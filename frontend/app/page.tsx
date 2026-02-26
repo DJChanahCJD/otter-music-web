@@ -8,7 +8,7 @@ import { MusicPlaylistView } from '@/components/MusicPlaylistView';
 import { MusicSearchView } from '@/components/MusicSearchView';
 import { MusicSidebar } from '@/components/MusicSidebar';
 import { NetEaseView } from '@/components/external/NetEaseView';
-import { MusicTrack } from '@/lib/types';
+import { MusicTrack } from '@shared/types';
 import { format } from 'date-fns';
 
 export default function MusicPage() {

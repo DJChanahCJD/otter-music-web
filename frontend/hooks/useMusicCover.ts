@@ -1,5 +1,5 @@
 import { musicApi } from "@/lib/api";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 import { useState, useEffect } from "react";
 
 export function useMusicCover(

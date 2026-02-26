@@ -7,7 +7,7 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LyricsPanel } from "./LyricsPanel";
 import { MusicCover } from "./MusicCover";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 
 interface FullScreenPlayerProps {
   isFullScreen: boolean;

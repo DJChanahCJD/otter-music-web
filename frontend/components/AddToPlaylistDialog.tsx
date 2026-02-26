@@ -3,7 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Plus, ListMusic } from "lucide-react";
 import { useMusicStore } from "@/stores/music-store";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 import { toast } from "sonner";
 
 interface AddToPlaylistDialogProps {

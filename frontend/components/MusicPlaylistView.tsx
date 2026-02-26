@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 
 interface MusicPlaylistViewProps {
   title: string;

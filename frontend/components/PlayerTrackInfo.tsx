@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Music2, ChevronUp, ChevronDown, Heart, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MusicCover } from "./MusicCover";
 

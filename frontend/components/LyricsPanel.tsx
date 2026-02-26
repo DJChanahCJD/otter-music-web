@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Heart } from "lucide-react";
 import { musicApi } from "@/lib/api";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 import { Button } from "./ui/button";
 
 interface LyricsPanelProps {

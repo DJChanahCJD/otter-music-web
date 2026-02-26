@@ -26,7 +26,7 @@ import { downloadTrack } from "@/lib/utils/download";
 import { List } from "react-window";
 import { AutoSizer } from "react-virtualized-auto-sizer";
 import { useShallow } from "zustand/react/shallow";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 import { processBatchCPU, processBatchIO } from "@/lib/utils";
 
 interface MusicTrackListProps {

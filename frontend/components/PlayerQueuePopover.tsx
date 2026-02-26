@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Trash2, Shuffle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 import { useEffect, useRef, useState } from "react";
 
 interface PlayerQueuePopoverProps {

@@ -12,7 +12,7 @@ import { ReactNode } from "react";
 import { useTheme } from "next-themes";
 import { MusicCover } from "./MusicCover";
 import { useMusicCover } from "@/hooks/useMusicCover";
-import { MusicTrack } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 
 interface MusicTrackMobileMenuProps {
   track: MusicTrack;
