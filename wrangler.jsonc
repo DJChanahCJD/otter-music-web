@@ -1,0 +1,12 @@
+// https://developers.cloudflare.com/workers/wrangler/configuration/
+{
+	"name": "vibe-template-cf",
+	"compatibility_date": "2026-01-01",
+	"assets": {
+		// The path to the directory containing the `index.html` file to be served at `/`
+		"directory": "./frontend/out"
+	},
+	"observability": {
+		"enabled": true
+	}
+}
