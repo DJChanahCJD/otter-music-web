@@ -5,7 +5,7 @@ import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GlobalMusicPlayer } from "@/components/GlobalMusicPlayer";
 
-export const APP_NAME = "Vibe Template CF";
+export const APP_NAME = "Otter Music";
 export const metadata: Metadata = {
   title: APP_NAME,
 };

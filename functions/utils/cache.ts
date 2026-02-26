@@ -15,7 +15,7 @@ export const CACHE_CONFIG = {
   },
 };
 
-const cacheName = 'vibe-template-cf-cache';
+const cacheName = 'otter-music-cache';
 
 
 export function createCacheKey(request: Request): Request {

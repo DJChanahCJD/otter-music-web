@@ -1,5 +1,5 @@
 {
-  "name": "@vibe-template-cf/frontend",
+  "name": "@otter-music/frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -28,7 +28,7 @@
     "uuid": "^13.0.0",
     "vaul": "^1.1.2",
     "zustand": "^5.0.11",
-    "@vibe-template-cf/shared": "*"
+    "@otter-music/shared": "*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -103,7 +103,7 @@ export const MusicSidebar = memo(function MusicSidebar({
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold tracking-tight px-2 flex items-center gap-2">
             <Music2 className="h-5 w-5" />
-            Vibe Template CF
+            Otter Music
           </h2>
         </div>
         <div className="space-y-1">

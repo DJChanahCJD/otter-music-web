@@ -5,7 +5,7 @@ export type SiteRule = {
   headers: Record<string, string>;
 };
 
-const DEFAULT_UA = "Mozilla/5.0 (compatible; vibe-template-cf Proxy/1.0)";
+const DEFAULT_UA = "Mozilla/5.0 (compatible; otter-music Proxy/1.0)";
 
 export const SITE_RULES: SiteRule[] = [
   {

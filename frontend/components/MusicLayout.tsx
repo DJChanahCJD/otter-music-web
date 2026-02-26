@@ -38,7 +38,7 @@ export function MusicLayout({ sidebar, children, player }: MusicLayoutProps) {
               : sidebar}
           </SheetContent>
         </Sheet>
-        <span className="ml-2 font-semibold">Vibe Template CF</span>
+        <span className="ml-2 font-semibold">Otter Music</span>
       </div>
 
       <div className="flex-1 min-h-0 relative">

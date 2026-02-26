@@ -1,4 +1,4 @@
-# Vibe Template CF
+# Otter Music
 
 基于 Next.js 16、Tailwind CSS v4 和 shadcn/ui 的现代化 Cloudflare 开发模板。
 
