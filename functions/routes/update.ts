@@ -22,6 +22,16 @@ interface GitHubRelease {
   }[];
 }
 
+interface UpdateInfo {
+  hasUpdate: boolean;
+  latestVersion: string;
+  changelog: string;
+  downloadUrl: string;
+  directUrl: string;
+  publishDate: string;
+  size: number;
+}
+
 /**
  * Check for updates
  * GET /api/update/check?version=v1.0.0
@@ -60,16 +70,17 @@ app.get('/check', async (c) => {
     // Construct download URL pointing to our proxy
     const proxyDownloadUrl = `${new URL(c.req.url).origin}/update/download?url=${encodeURIComponent(apkAsset.browser_download_url)}&filename=${encodeURIComponent(apkAsset.name)}`;
 
-    return ok(c, {
+    const updateInfo : UpdateInfo = {
       hasUpdate,
       latestVersion,
-      currentVersion,
       changelog: release.body,
       downloadUrl: proxyDownloadUrl,
       directUrl: apkAsset.browser_download_url,
       publishDate: release.published_at,
       size: apkAsset.size,
-    });
+    };
+
+    return ok(c, updateInfo);
 
   } catch (error) {
     console.error('Update check error:', error);
