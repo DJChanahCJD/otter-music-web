@@ -6,7 +6,6 @@ import { signJWT } from '@utils/auth';
 import type { Env } from '../types/hono';
 import { fail, ok } from '@utils/response';
 
-// TODO: 如果不需要认证系统，可以手动删除相关代码
 export const authRoutes = new Hono<{ Bindings: Env }>();
 
 authRoutes.post(

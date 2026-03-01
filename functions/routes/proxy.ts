@@ -5,7 +5,6 @@ import { proxyGet, handleStreamResponse } from '@utils/proxy';
 import type { Env } from '../types/hono';
 import { fail } from '@utils/response';
 
-// TODO: 如果不需要代理功能，可以手动删除相关代码
 export const proxyRoutes = new Hono<{ Bindings: Env }>();
 
 const proxySchema = z.object({

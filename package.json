@@ -11,10 +11,13 @@
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" ",
     "dev:frontend": "npm run dev --prefix frontend",
     "dev:backend": "npx wrangler pages dev frontend/out --kv \"oh_file_url\" --binding PASSWORD=123456 --ip 0.0.0.0 --port 8080",
-    "build": "npm run build --prefix frontend"
+    "build": "npm run build --prefix frontend",
+    "ci-test": "concurrently -k -s first \"npm run dev:backend\" \"wait-on http://localhost:8080 && mocha --exit\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "mocha": "^10.6.0",
+    "wait-on": "^7.2.0",
     "wrangler": "^4.24.0"
   }
 }

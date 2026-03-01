@@ -1,64 +1,76 @@
 # Otter Music
 
-基于 **Next.js 16**、**Hono** (Cloudflare Pages Functions) 和 **Tailwind CSS v4** 的现代化音乐播放器项目。
+<p align="center">
+  <img width="100" alt="Otter Music icon" src="frontend/app/icon.svg">
+</p>
+<p align="center"><strong>Stream your music like an otter</strong></p>
 
-## 核心特性
+<p align="center">
+  基于 [GD Studio's Online Music Platform API](https://music-api.gdstudio.xyz/api.php) 的现代化多音源聚合音乐播放器。
+</p>
 
-- **前端框架**: [Next.js 16](https://nextjs.org/) (App Router) + [React 19](https://react.dev/)
-- **后端 API**: [Hono](https://hono.dev/) (运行于 Cloudflare Pages Functions)
-- **语言**: [TypeScript](https://www.typescriptlang.org/) (Monorepo 架构)
-- **样式**: [Tailwind CSS v4](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/)
-- **状态管理**: [Zustand](https://zustand-demo.pmnd.rs/)
-- **图标**: [Lucide React](https://lucide.dev/)
-- **部署**: Cloudflare Pages + Edge Functions
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
+  <img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4.x-06B6D4?logo=tailwindcss&logoColor=white" />
+  <img src="https://img.shields.io/badge/shadcn%2Fui-latest-000000?logo=shadcnui&logoColor=white" />
+  <img src="https://img.shields.io/badge/Hono-4.x-E36002?logo=hono&logoColor=white" />
+  <img src="https://img.shields.io/badge/Cloudflare-Pages-F38020?logo=cloudflare&logoColor=white" />
+</p>
 
-## 项目结构
+## ✨ 核心特性
 
-本项目采用 Monorepo 结构管理：
+- 🎵 **网易云音乐集成**：支持搜索、歌单导入、VIP 歌曲试听（部分）、二维码登录。
+- ☁️ **云端同步**：基于 Cloudflare KV 实现多端歌单与配置同步。
+- 📝 **歌词系统**：支持 LRC 滚动歌词与实时解析。
+- 🎨 **现代化 UI**：Next.js 16 + Tailwind v4 打造的响应式界面，适配桌面与移动端。
+- 🚀 **边缘计算**：后端逻辑运行在 Cloudflare Edge，快速响应。
 
-- **`frontend/`**: Next.js 前端应用，包含 UI 组件、页面和状态管理。
-- **`functions/`**: 基于 Hono 的后端 API，处理音乐数据代理、认证等逻辑。
-- **`shared/`**: 前后端共享的 TypeScript 类型定义和工具函数。
+## 🛠️ 技术栈
 
-## 快速开始
+- **Frontend**: Next.js 16 (App Router), React 19, Tailwind CSS v4, Zustand
+- **Backend**: Hono (运行于 Cloudflare Pages Functions)
+- **Database**: Cloudflare KV (存储配置与歌单)
 
-### 1. 获取项目
+## 🚀 快速开始
 
-```bash
-git clone https://github.com/your-username/otter-music-web.git
-cd otter-music-web
-```
+### 前置要求
+- Node.js 18+
+- Cloudflare 账号
 
-### 2. 安装依赖
+### 本地开发
 
-推荐使用 `npm` 或 `pnpm` 安装依赖（本项目根目录使用 npm workspaces）：
+1. **安装依赖**
+   ```bash
+   npm install
+   ```
 
-```bash
-npm install
-# 或者
-pnpm install
-```
+2. **启动项目**
+   ```bash
+   npm run dev
+   ```
+   - 前端：`http://localhost:3000`
+   - 后端：`http://localhost:8080` (Wrangler 代理)
 
-### 3. 启动开发服务器
+> **Note**: 首次启动可能需要先运行 `npm run build` 构建前端资源。开发环境下默认管理密码为 `123456`。
 
-使用以下命令同时启动前端和后端服务：
+## 📦 部署指南 (Cloudflare Pages)
 
-```bash
-npm run build
-npm run dev
-```
+1. **创建项目**：Fork 本仓库，在 Cloudflare Dashboard 创建 Pages 项目。
+2. **构建配置**：
+   - **Build command**: `npm install && npm run build`
+   - **Build output directory**: `frontend/out`
+3. **环境变量**：
+   - `PASSWORD`: 设置你的管理/同步密码（必须）
+4. **KV 绑定**：
+   - 创建 KV Namespace 命名为 `oh_file_url`
+   - 在 Pages 设置中绑定该 KV，变量名设为 `oh_file_url`
 
-- **前端地址**: [http://localhost:3000](http://localhost:3000)
-- **后端 API**: [http://localhost:8080](http://localhost:8080)
+## 🤝 贡献
 
-> **注意**: 后端服务使用 `wrangler` 模拟 Cloudflare Pages 环境。
+欢迎提交 Issue 或 Pull Request！
 
-## API 参考
+## 📄 License
 
-后端 API 位于 `functions/routes` 目录下，主要端点包括：
-
-- `/api/auth/*`: 用户认证相关
-- `/api/music/*`: 音乐搜索、播放链接获取
-- `/api/proxy/*`: 代理服务
-
-详细接口定义请参考 `functions/routes` 源码或 `test/test.js` 中的测试用例。
+MIT
