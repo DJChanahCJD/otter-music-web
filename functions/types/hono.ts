@@ -10,4 +10,5 @@ export interface KVNamespace {
 export type Env = {
   oh_file_url: KVNamespace;
   PASSWORD?: string;
+  GITHUB_TOKEN?: string;
 };

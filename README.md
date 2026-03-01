@@ -64,6 +64,7 @@
    - **Build output directory**: `frontend/out`
 3. **环境变量**：
    - `PASSWORD`: 设置你的管理/同步密码（必须）
+   - `GITHUB_TOKEN`: 用于 GitHub API 调用（可选，用于更新检查）
 4. **KV 绑定**：
    - 创建 KV Namespace 命名为 `oh_file_url`
    - 在 Pages 设置中绑定该 KV，变量名设为 `oh_file_url`

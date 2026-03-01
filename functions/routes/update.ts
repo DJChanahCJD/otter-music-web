@@ -29,9 +29,9 @@ app.get('/check', async (c) => {
     const cacheKey = new Request(GITHUB_API_URL);
     const cached = await getFromCache(cacheKey);
 
-    const release: GitHubRelease = cached
+    const release = cached
       ? await cached.json()
-      : await fetchRelease(cacheKey);
+      : await fetchRelease(cacheKey, c.env.GITHUB_TOKEN);
 
     const apk = release.assets.find(a => a.name.endsWith('.apk'));
     if (!apk) return fail(c, 'No APK found', 404);
@@ -91,14 +91,20 @@ app.get('/download', async (c) => {
    工具函数
 ========================= */
 
-async function fetchRelease(cacheKey: Request) {
+async function fetchRelease(cacheKey: Request, token?: string) {
+  const headers: Record<string, string> = {
+    'User-Agent': 'Otter-Music-App',
+    'Accept': 'application/vnd.github.v3+json',
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const resp = await fetch(GITHUB_API_URL, {
-    headers: {
-      'User-Agent': 'Otter-Music-App',
-      'Accept': 'application/vnd.github.v3+json',
-    },
+    headers,
     cf: {
-      cacheTtl: 600,          // ⭐ 边缘缓存 10 分钟
+      cacheTtl: 600,
       cacheEverything: true,
     }
   } as any);
