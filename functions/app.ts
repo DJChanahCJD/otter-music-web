@@ -1,6 +1,7 @@
 import { corsMiddleware } from './middleware/cors';
 import { authRoutes } from './routes/auth';
 import { proxyRoutes } from './routes/proxy';
+import { updateRoutes } from './routes/update';
 import { musicRoutes } from './routes/music';
 import { syncRoutes } from './routes/sync';
 
@@ -25,6 +26,7 @@ app.get('/health', (c) => c.text('OK'));
 app.route('/auth', authRoutes);
 
 app.route('/proxy', proxyRoutes);
+app.route('/update', updateRoutes);
 app.route('/music-api', musicRoutes);
 app.route('/sync', syncRoutes);
 

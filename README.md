@@ -1,4 +1,5 @@
 # Otter Music
+[移动端APP](https://github.com/DJChanahCJD/otter-music)
 
 <p align="center">
   <img width="100" alt="Otter Music icon" src="frontend/app/icon.svg">
