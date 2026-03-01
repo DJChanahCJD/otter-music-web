@@ -46,11 +46,15 @@ export async function putToCache(
 
   const maxAge = CACHE_CONFIG[type].maxAge;
 
-  const cachedResp = response.clone();
-  cachedResp.headers.set(
-    "Cache-Control",
-    `public, max-age=${maxAge}`
-  );
+  // Recreate response to ensure headers are mutable
+  const newHeaders = new Headers(response.headers);
+  newHeaders.set("Cache-Control", `public, max-age=${maxAge}`);
+
+  const cachedResp = new Response(response.clone().body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
 
   await cache.put(key, cachedResp);
 }
