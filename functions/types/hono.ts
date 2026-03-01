@@ -11,6 +11,6 @@ export interface KVNamespace {
 // KV和环境变量配置参考："dev:backend": "npx wrangler pages dev frontend/out --kv \"oh_file_url\" --r2 \"oh_file_r2\" --binding PASSWORD=123456 --binding API_TOKEN=123456 --ip 0.0.0.0 --port 8080 --persist-to ./data",
 
 export type Env = {
-  your_kv: KVNamespace;   // TODO: 替换为自己的KVNamespace， 或者删除
+  oh_file_url: KVNamespace;   // TODO: 替换为自己的KVNamespace， 或者删除
   PASSWORD?: string;
 };

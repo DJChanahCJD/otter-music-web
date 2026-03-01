@@ -132,7 +132,7 @@ export const musicApi = {
 
   /* ---------------- 封面 ---------------- */
 
-  async getPic(id: string, source: MusicSource, size: number = 300): Promise<string | null> {
+  async getPic(id: string, source: MusicSource, size: number = 800): Promise<string | null> {
     const key = `pic:${source}:${id}`;
 
     const res = await clientSWRFetch<{ url: string }>(

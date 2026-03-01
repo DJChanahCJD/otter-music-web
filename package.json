@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" ",
     "dev:frontend": "npm run dev --prefix frontend",
-    "dev:backend": "npx wrangler pages dev frontend/out --ip 0.0.0.0 --port 8080",
+    "dev:backend": "npx wrangler pages dev frontend/out --kv \"oh_file_url\" --binding PASSWORD=123456 --ip 0.0.0.0 --port 8080",
     "build": "npm run build --prefix frontend"
   },
   "devDependencies": {

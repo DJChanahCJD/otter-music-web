@@ -9,6 +9,7 @@ import {
   SquarePlus,
   ListVideo,
   Cloud,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { useState, memo } from "react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
+import { SyncConfig } from "./SyncConfig";
 
 interface MusicSidebarProps {
   currentView: "search" | "favorites" | "playlist" | "queue" | "netease";
@@ -34,6 +36,37 @@ interface MusicSidebarProps {
   onItemClick?: () => void;
   className?: string;
 }
+
+const NavItem = ({
+  active,
+  icon: Icon,
+  label,
+  onClick,
+  onItemClick,
+}: {
+  active: boolean;
+  icon: any;
+  label: string;
+  onClick: () => void;
+  onItemClick?: () => void;
+}) => (
+  <div
+    role="button"
+    className={cn(
+      buttonVariants({ variant: "ghost" }),
+      "w-full justify-start gap-2 cursor-pointer group pr-1",
+      active && "bg-primary/80",
+    )}
+    title={label}
+    onClick={() => {
+      onClick();
+      onItemClick?.();
+    }}
+  >
+    <Icon className="h-4 w-4 shrink-0" />
+    <span className="truncate flex-1 text-left">{label}</span>
+  </div>
+);
 
 export const MusicSidebar = memo(function MusicSidebar({
   currentView,
@@ -51,6 +84,7 @@ export const MusicSidebar = memo(function MusicSidebar({
   );
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSyncOpen, setIsSyncOpen] = useState(false);
 
   const handleCreatePlaylist = () => {
     if (!newPlaylistName.trim()) {
@@ -62,35 +96,6 @@ export const MusicSidebar = memo(function MusicSidebar({
     setIsCreateOpen(false);
     toast.success("歌单创建成功");
   };
-
-  const NavItem = ({
-    active,
-    icon: Icon,
-    label,
-    onClick,
-  }: {
-    active: boolean;
-    icon: any;
-    label: string;
-    onClick: () => void;
-  }) => (
-    <div
-      role="button"
-      className={cn(
-        buttonVariants({ variant: "ghost" }),
-        "w-full justify-start gap-2 cursor-pointer group pr-1",
-        active && "bg-primary/80",
-      )}
-      title={label}
-      onClick={() => {
-        onClick();
-        onItemClick?.();
-      }}
-    >
-      <Icon className="h-4 w-4 shrink-0" />
-      <span className="truncate flex-1 text-left">{label}</span>
-    </div>
-  );
 
   return (
     <div
@@ -112,34 +117,48 @@ export const MusicSidebar = memo(function MusicSidebar({
             icon={Search}
             label="搜索发现"
             onClick={() => onViewChange("search")}
+            onItemClick={onItemClick}
           />
           <NavItem
             active={currentView === "favorites"}
             icon={Heart}
             label="我的喜欢"
             onClick={() => onViewChange("favorites")}
+            onItemClick={onItemClick}
           />
           <NavItem
             active={currentView === "queue"}
             icon={ListVideo}
             label={`播放队列 (${queue.length})`}
             onClick={() => onViewChange("queue")}
+            onItemClick={onItemClick}
           />
           <NavItem
             active={currentView === "netease"}
             icon={Cloud}
             label="网易云音乐"
             onClick={() => onViewChange("netease")}
+            onItemClick={onItemClick}
           />
         </div>
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">
+        <SyncConfig open={isSyncOpen} onOpenChange={setIsSyncOpen} />
         <div className="px-4 py-2 flex items-center justify-between">
           <h3 className="text-sm font-medium text-muted-foreground px-2">
             我的歌单
           </h3>
-          <div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:bg-transparent hover:text-primary"
+              title="同步设置"
+              onClick={() => setIsSyncOpen(true)}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
                 {/* 图标按钮模板 */}

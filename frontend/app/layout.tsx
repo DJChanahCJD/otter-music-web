@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GlobalMusicPlayer } from "@/components/GlobalMusicPlayer";
+import { SyncManager } from "@/components/SyncManager";
 
 export const APP_NAME = "Otter Music";
 export const metadata: Metadata = {
@@ -44,6 +45,7 @@ export default function RootLayout({
             }}
           />
           <GlobalMusicPlayer />
+          <SyncManager />
         </ThemeProvider>
       </body>
     </html>
