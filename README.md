@@ -7,7 +7,7 @@
 <p align="center"><strong>Stream your music like an otter</strong></p>
 
 <p align="center">
-  基于 [GD Studio's Online Music Platform API](https://music-api.gdstudio.xyz/api.php) 的现代化多音源聚合音乐播放器。
+  基于 <a href="https://music-api.gdstudio.xyz/api.php">GD Studio's API</a> 的现代化多音源聚合音乐播放器。
 </p>
 
 <p align="center">
@@ -75,3 +75,7 @@
 ## 📄 License
 
 MIT
+
+## 效果图
+<img width="800" height="600" alt="image" src="https://github.com/user-attachments/assets/791ec118-46ba-4acb-9712-484e64d18d88" />
+<img width="800" height="600" alt="image" src="https://github.com/user-attachments/assets/9e2f0f20-3001-43d5-b5c1-f93622ace4c2" />
