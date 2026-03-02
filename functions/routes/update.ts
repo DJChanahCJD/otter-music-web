@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { ok, fail, encodeContentDisposition } from '../utils/response';
 import { Env } from '../types/hono';
-import { getFromCache, putToCache } from '../utils/cache';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -19,34 +18,35 @@ interface GitHubRelease {
   }[];
 }
 
+interface UpdateInfo {
+  latestVersion: string;
+  changelog: string;
+  downloadUrl: string;
+  directUrl: string;
+  publishDate: string;
+  size: number;
+}
+
 /* =========================
-   更新检查
+   获取最新版本信息
 ========================= */
 app.get('/check', async (c) => {
-  const current = c.req.query('version');
-
   try {
-    const cacheKey = new Request(GITHUB_API_URL);
-    const cached = await getFromCache(cacheKey);
-
-    const release = cached
-      ? await cached.json()
-      : await fetchRelease(cacheKey, c.env.GITHUB_TOKEN);
+    const release: GitHubRelease = await fetchRelease(c.env.GITHUB_TOKEN);
 
     const apk = release.assets.find(a => a.name.endsWith('.apk'));
     if (!apk) return fail(c, 'No APK found', 404);
 
-    const latest = release.tag_name;
-
-    return ok(c, {
-      hasUpdate: current ? isNewer(latest, current) : true,
-      latestVersion: latest,
+    const updateInfo: UpdateInfo = {
+      latestVersion: release.tag_name,
       changelog: release.body,
       downloadUrl: buildProxyUrl(c.req.url, apk),
       directUrl: apk.browser_download_url,
       publishDate: release.published_at,
       size: apk.size,
-    });
+    };
+
+    return ok(c, updateInfo);
 
   } catch (e) {
     console.error(e);
@@ -76,7 +76,7 @@ app.get('/download', async (c) => {
     const headers = new Headers(resp.headers);
     headers.set('Content-Disposition', encodeContentDisposition(filename, false));
     headers.set('Content-Type', 'application/vnd.android.package-archive');
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');  // 缓存 1 年
     headers.delete('Set-Cookie');
 
     return new Response(resp.body, { status: resp.status, headers });
@@ -91,32 +91,32 @@ app.get('/download', async (c) => {
    工具函数
 ========================= */
 
-async function fetchRelease(cacheKey: Request, token?: string) {
+async function fetchRelease(token?: string) {
   const headers: Record<string, string> = {
     'User-Agent': 'Otter-Music-App',
-    'Accept': 'application/vnd.github.v3+json',
+    Accept: 'application/vnd.github.v3+json',
   };
 
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const resp = await fetch(GITHUB_API_URL, {
     headers,
     cf: {
-      cacheTtl: 600,
+      cacheTtl: 600,        // 缓存 10 分钟
       cacheEverything: true,
-    }
+    },
   } as any);
 
-  if (!resp.ok)
+  if (!resp.ok) {
     throw new Error(`GitHub API ${resp.status}`);
+  }
 
-  await putToCache(cacheKey, resp, 'api');
   return resp.json();
 }
 
-function buildProxyUrl(baseUrl: string, asset: any) {
+function buildProxyUrl(baseUrl: string, asset: { name: string; browser_download_url: string }) {
   const origin = new URL(baseUrl).origin;
   return `${origin}/update/download?url=${encodeURIComponent(
     asset.browser_download_url
@@ -127,21 +127,10 @@ function isValidGithubUrl(url: string) {
   try {
     const host = new URL(url).hostname;
     return ['github.com', 'objects.githubusercontent.com']
-      .some(d => host.endsWith(d));
+      .some(domain => host.endsWith(domain));
   } catch {
     return false;
   }
-}
-
-function isNewer(latest: string, current: string) {
-  const a = latest.replace(/^v/, '').split('.').map(Number);
-  const b = current.replace(/^v/, '').split('.').map(Number);
-
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if ((a[i] || 0) > (b[i] || 0)) return true;
-    if ((a[i] || 0) < (b[i] || 0)) return false;
-  }
-  return false;
 }
 
 export const updateRoutes = app;
