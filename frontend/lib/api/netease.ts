@@ -127,4 +127,93 @@ export const neteaseApi = {
 
     return res.json();
   },
+
+  getToplist: async (cookie: string) => {
+    const key = `netease:toplist`;
+
+    return clientSWRFetch(
+      key,
+      async () => {
+        const res = await fetch(`${API_URL}/music-api/netease/toplist`, {
+          method: 'POST',
+          body: JSON.stringify({ cookie }),
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Failed to fetch toplist');
+        return res.json();
+      },
+      TTL_LONG
+    );
+  },
+
+  getAlbum: async (id: string, cookie: string) => {
+    const key = `netease:album:${id}`;
+
+    return clientSWRFetch(
+      key,
+      async () => {
+        const res = await fetch(`${API_URL}/music-api/netease/album`, {
+          method: 'POST',
+          body: JSON.stringify({ id, cookie }),
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Failed to fetch album');
+        return res.json();
+      },
+      TTL_LONG
+    );
+  },
+
+  getArtist: async (id: string, cookie: string) => {
+    const key = `netease:artist:${id}`;
+
+    return clientSWRFetch(
+      key,
+      async () => {
+        const res = await fetch(`${API_URL}/music-api/netease/artist`, {
+          method: 'POST',
+          body: JSON.stringify({ id, cookie }),
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Failed to fetch artist');
+        return res.json();
+      },
+      TTL_LONG
+    );
+  },
+
+  getPlaylists: async (cat: string, order: string | undefined, limit: number, offset: number, cookie: string) => {
+    const normalizedCat = cat || '全部';
+    const normalizedOrder = order || 'hot';
+    const key = `netease:playlists:${normalizedCat}:${normalizedOrder}:${limit}:${offset}`;
+
+    return clientSWRFetch(
+      key,
+      async () => {
+        const res = await fetch(`${API_URL}/music-api/netease/playlists`, {
+          method: 'POST',
+          body: JSON.stringify({ cat: normalizedCat, order: normalizedOrder, limit, offset, cookie }),
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Failed to fetch playlists');
+        return res.json();
+      },
+      TTL_SHORT
+    );
+  },
+
+  resolveUrl: async (url: string) => {
+    const res = await fetch(`${API_URL}/music-api/netease/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Failed to resolve URL');
+    return res.json();
+  },
 };

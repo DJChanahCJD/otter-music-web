@@ -16,14 +16,14 @@ function createSecretKey(size: number): string {
 }
 
 function aesEncrypt(text: string, secKey: string, algo: 'AES-CBC' | 'AES-ECB', ivString: string = '0102030405060708'): string {
-  const cipher = forge.cipher.createCipher(algo, forge.util.createBuffer(secKey));
+  const cipher = forge.cipher.createCipher(algo, forge.util.createBuffer(secKey, 'utf8'));
   if (algo === 'AES-CBC') {
       cipher.start({ iv: ivString });
   } else {
       cipher.start({});
   }
   
-  cipher.update(forge.util.createBuffer(text));
+  cipher.update(forge.util.createBuffer(text, 'utf8'));
   cipher.finish();
   return cipher.output.data; // Binary string
 }
@@ -62,7 +62,7 @@ export function eapi(url: string, object: any) {
   const message = `nobody${url}use${text}md5forencrypt`;
   const digest = forge.md5
     .create()
-    .update(message)
+    .update(forge.util.encodeUtf8(message))
     .digest()
     .toHex();
   const data = `${url}-36cd479b6b5-${text}-36cd479b6b5-${digest}`;

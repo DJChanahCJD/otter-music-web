@@ -8,6 +8,11 @@ import {
   getMyInfo,
   getRecommendPlaylists,
   search,
+  getToplist,
+  getAlbum,
+  getArtist,
+  getPlaylists,
+  resolveUrl,
 } from '../../utils/music/netease-api';
 
 export const neteaseRoutes = new Hono<{ Bindings: Env }>();
@@ -85,6 +90,72 @@ neteaseRoutes.post('/recommend', async (c) => {
   const { cookie } = await c.req.json();
   try {
     const res = await getRecommendPlaylists(cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 获取排行榜
+ */
+neteaseRoutes.post('/toplist', async (c) => {
+  const { cookie } = await c.req.json();
+  try {
+    const res = await getToplist(cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 获取专辑详情
+ */
+neteaseRoutes.post('/album', async (c) => {
+  const { id, cookie } = await c.req.json();
+  try {
+    const res = await getAlbum(id, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 获取艺人详情
+ */
+neteaseRoutes.post('/artist', async (c) => {
+  const { id, cookie } = await c.req.json();
+  try {
+    const res = await getArtist(id, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 获取分类歌单
+ */
+neteaseRoutes.post('/playlists', async (c) => {
+  const { cat, order, limit, offset, cookie } = await c.req.json();
+  try {
+    const res = await getPlaylists(cat, order, limit, offset, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 解析 URL
+ */
+neteaseRoutes.post('/resolve', async (c) => {
+  const { url } = await c.req.json();
+  try {
+    const res = resolveUrl(url);
+    if (!res) return c.json({ error: 'Invalid URL' }, 400);
     return c.json(res);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);

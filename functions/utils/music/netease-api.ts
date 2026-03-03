@@ -265,3 +265,97 @@ export async function getRecommendPlaylists(cookie: string) {
     };
     return request(url, data, cookie);
 }
+
+export async function getToplist(cookie: string = '') {
+    const url = `${BASE_URL}/weapi/toplist/detail`;
+    const data = {};
+    return request(url, data, cookie);
+}
+
+export async function getAlbum(id: string, cookie: string = '') {
+    const realId = id.replace(/^(nealbum_|ne_album_)/, '');
+    const url = `${BASE_URL}/weapi/v1/album/${realId}`;
+    const data = {};
+    return request(url, data, cookie);
+}
+
+export async function getArtist(id: string, cookie: string = '') {
+    const realId = id.replace(/^(neartist_|ne_artist_)/, '');
+    const url = `${BASE_URL}/weapi/v1/artist/${realId}`;
+    const data = {};
+    return request(url, data, cookie);
+}
+
+export async function getPlaylists(cat: string = '全部', order: string = 'hot', limit: number = 35, offset: number = 0, cookie: string = '') {
+    const url = `${BASE_URL}/weapi/playlist/list`;
+    const data = {
+        cat,
+        order,
+        limit,
+        offset,
+        total: true
+    };
+    return request(url, data, cookie);
+}
+
+export function resolveUrl(url: string) {
+    let result: { type: string; id: string } | null = null;
+    let id = '';
+    
+    // Cleanup URL
+    url = url.replace('music.163.com/#/discover/toplist?', 'music.163.com/#/playlist?');
+    url = url.replace('music.163.com/#/my/m/music/', 'music.163.com/');
+    url = url.replace('music.163.com/#/m/', 'music.163.com/');
+    url = url.replace('music.163.com/#/', 'music.163.com/');
+
+    const getParameterByName = (name: string, url: string) => {
+        if (!url) url = '';
+        name = name.replace(/[\[\]]/g, '\\$&');
+        const regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
+        const results = regex.exec(url);
+        if (!results) return '';
+        if (!results[2]) return '';
+        return decodeURIComponent(results[2].replace(/\+/g, ' '));
+    };
+
+    if (url.search('//music.163.com/playlist') !== -1) {
+        const match = /\/\/music.163.com\/playlist\/([0-9]+)/.exec(url);
+        id = match ? match[1] : getParameterByName('id', url);
+        if (id) {
+            result = {
+                type: 'playlist',
+                id: `neplaylist_${id}`
+            };
+        }
+    } else if (url.search('//music.163.com/artist') !== -1) {
+        const match = /\/\/music.163.com\/artist\?id=([0-9]+)/.exec(url);
+        id = match ? match[1] : getParameterByName('id', url);
+         if (id) {
+            result = {
+                type: 'artist',
+                id: `neartist_${id}`
+            };
+        }
+    } else if (url.search('//music.163.com/album') !== -1) {
+        const match = /\/\/music.163.com\/album\/([0-9]+)/.exec(url);
+        id = match ? match[1] : getParameterByName('id', url);
+         if (id) {
+            result = {
+                type: 'album',
+                id: `nealbum_${id}`
+            };
+        }
+    } else if (url.search('//music.163.com/song') !== -1) {
+        const match = /\/\/music.163.com\/song\/([0-9]+)/.exec(url);
+        id = match ? match[1] : getParameterByName('id', url);
+         if (id) {
+            result = {
+                type: 'song',
+                id: `netrack_${id}`
+            };
+        }
+    }
+    
+    return result;
+}
+

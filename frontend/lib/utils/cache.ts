@@ -1,5 +1,5 @@
 // lib/utils/client-cache.ts（仅客户端使用）
-const CACHE_NAME = 'otter-music-cache-v1';
+const CACHE_NAME = 'otter-music-cache-v2';
 const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; 
 
 const inflightRequests = new Map<string, Promise<any>>();
