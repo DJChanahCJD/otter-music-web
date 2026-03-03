@@ -1,5 +1,6 @@
 import { clientSWRFetch } from "../utils/cache";
 import { API_URL } from "./config";
+import type { MusicTrack } from "@shared/types";
 
 const TTL_SHORT = 5 * 60 * 1000;
 const TTL_MEDIUM = 15 * 60 * 1000;
@@ -102,5 +103,28 @@ export const neteaseApi = {
       },
       TTL_SHORT
     );
-  }
+  },
+
+  searchTracks: async (
+    keyword: string,
+    page: number,
+    limit: number,
+    cookie: string,
+    signal?: AbortSignal
+  ): Promise<{ items: MusicTrack[]; hasMore: boolean }> => {
+    const res = await fetch(`${API_URL}/music-api/netease/search`, {
+      method: "POST",
+      body: JSON.stringify({ keyword, page, limit, cookie }),
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.error || "Search failed");
+    }
+
+    return res.json();
+  },
 };

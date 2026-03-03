@@ -38,7 +38,7 @@ interface MusicTrackListProps {
   onLoadMore?: () => void;
   hasMore?: boolean;
   loading?: boolean;
-  emptyMessage?: string;
+  emptyMessage?: React.ReactNode;
 }
 
 interface RowProps {
@@ -212,7 +212,6 @@ export function MusicTrackList({
       1, // 一次下载一个
     );
     
-    toast.success(`下载任务已全部开始`, { id: toastId });
     setIsSelectionMode(false);
     setSelectedIds(new Set());
   };
@@ -221,10 +220,7 @@ export function MusicTrackList({
     return (
       <div className="flex flex-col h-full items-center justify-center text-muted-foreground">
         <Search className="h-10 w-10 mb-4 opacity-20" />
-        <p>{emptyMessage}</p>
-        <p className="text-sm text-muted-foreground/60">
-          from GD音乐台(music.gdstudio.xyz)
-        </p>
+        <div className="text-center">{emptyMessage}</div>
       </div>
     );
   }

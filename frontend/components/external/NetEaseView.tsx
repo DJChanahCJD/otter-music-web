@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,7 +16,7 @@ import { neteaseApi } from '@/lib/api/netease';
 import { MusicTrack } from '@shared/types';
 import { useMusicStore } from '@/stores/music-store';
 import { useNetEaseStore, NetEaseProfile } from '@/stores/netease-store';
-import { RefreshCw, Loader2, ChevronLeft, Plus, User, LogOut } from 'lucide-react';
+import { RefreshCw, Loader2, ChevronLeft, Plus, User, LogOut, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MusicCover } from '../MusicCover';
 import { MusicPlaylistView } from '../MusicPlaylistView';
@@ -24,6 +24,7 @@ import { AvatarImage, AvatarFallback, Avatar } from '../ui/avatar';
 import { TabsList, TabsTrigger, TabsContent, Tabs } from '../ui/tabs';
 import { QRCodeSVG } from 'qrcode.react';
 import { processBatchCPU } from '@/lib/utils';
+import { MusicTrackList } from '../MusicTrackList';
 
 
 export function NetEaseView() {
@@ -236,6 +237,8 @@ function NetEaseBrowser({ cookie, userId, onLogout }: { cookie: string, userId: 
   const [importing, setImporting] = useState(false);
 
   const { createPlaylist, addToPlaylist, playContext } = useMusicStore();
+  const currentTrackId = useMusicStore(s => s.queue[s.currentIndex]?.id);
+  const isPlaying = useMusicStore(s => s.isPlaying);
 
   const createdPlaylists = playlists.filter(p => p.userId.toString() === userId.toString());
   const subscribedPlaylists = playlists.filter(p => p.userId.toString() !== userId.toString());
@@ -484,24 +487,174 @@ function NetEaseBrowser({ cookie, userId, onLogout }: { cookie: string, userId: 
                     <TabsTrigger value="created">Created</TabsTrigger>
                     <TabsTrigger value="subscribed">Subscribed</TabsTrigger>
                     <TabsTrigger value="recommended">Recommended</TabsTrigger>
+                    <TabsTrigger value="search">Search</TabsTrigger>
                 </TabsList>
             </div>
             <div className="flex-1 min-h-0">
-                <ScrollArea className="h-full">
-                    <div className="p-4">
-                        <TabsContent value="created" className="m-0 mt-0">
+                <TabsContent value="created" className="m-0 mt-0 h-full">
+                    <ScrollArea className="h-full">
+                        <div className="p-4">
                             {renderPlaylistGrid(createdPlaylists, loading)}
-                        </TabsContent>
-                        <TabsContent value="subscribed" className="m-0 mt-0">
+                        </div>
+                    </ScrollArea>
+                </TabsContent>
+                <TabsContent value="subscribed" className="m-0 mt-0 h-full">
+                    <ScrollArea className="h-full">
+                        <div className="p-4">
                             {renderPlaylistGrid(subscribedPlaylists, loading)}
-                        </TabsContent>
-                        <TabsContent value="recommended" className="m-0 mt-0">
+                        </div>
+                    </ScrollArea>
+                </TabsContent>
+                <TabsContent value="recommended" className="m-0 mt-0 h-full">
+                    <ScrollArea className="h-full">
+                        <div className="p-4">
                             {renderPlaylistGrid(recommendPlaylists, recLoading)}
-                        </TabsContent>
-                    </div>
-                </ScrollArea>
+                        </div>
+                    </ScrollArea>
+                </TabsContent>
+                <TabsContent value="search" className="m-0 mt-0 h-full">
+                    <NetEaseSearchTab
+                        cookie={cookie}
+                        onPlayContext={(list, index) => playContext(list, index)}
+                        currentTrackId={currentTrackId}
+                        isPlaying={isPlaying}
+                    />
+                </TabsContent>
             </div>
         </Tabs>
+      </div>
+    </div>
+  );
+}
+
+function NetEaseSearchTab({
+  cookie,
+  onPlayContext,
+  currentTrackId,
+  isPlaying,
+}: {
+  cookie: string;
+  onPlayContext: (tracks: MusicTrack[], startIndex?: number) => void;
+  currentTrackId?: string;
+  isPlaying?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<MusicTrack[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [isFirstLoading, setIsFirstLoading] = useState(false);
+
+  const abortRef = useRef<AbortController | null>(null);
+  const versionRef = useRef(0);
+
+  const fetchPage = async (nextPage: number, reset = false) => {
+    if (!query.trim()) return;
+    if (loading && !reset) return;
+
+    const version = ++versionRef.current;
+
+    if (reset) {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      setResults([]);
+      setPage(0);
+      setIsFirstLoading(true);
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await neteaseApi.searchTracks(
+        query,
+        nextPage,
+        20,
+        cookie,
+        abortRef.current?.signal
+      );
+
+      if (version !== versionRef.current) return;
+
+      setResults((prev) => (reset ? res.items : [...prev, ...res.items]));
+      setHasMore(res.hasMore);
+      setPage(nextPage);
+    } catch (e: any) {
+      if (e?.name !== "AbortError" && version === versionRef.current) {
+        toast.error("搜索失败，请重试");
+      }
+    } finally {
+      if (version === versionRef.current) {
+        setLoading(false);
+        setIsFirstLoading(false);
+      }
+    }
+  };
+
+  const handleClear = () => {
+    setQuery("");
+    setResults([]);
+    setPage(0);
+    setHasMore(false);
+    abortRef.current?.abort();
+    setLoading(false);
+    setIsFirstLoading(false);
+  };
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="p-4 border-b">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && fetchPage(1, true)}
+              placeholder="搜索歌曲 / 歌手 / 专辑"
+              className="pl-9 pr-9"
+            />
+            {query && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={handleClear}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
+          <Button onClick={() => fetchPage(1, true)} disabled={loading && isFirstLoading}>
+            {loading && isFirstLoading ? <Loader2 className="animate-spin" /> : <Search />}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 relative">
+        {isFirstLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <MusicTrackList
+            tracks={results}
+            onPlay={(track) => {
+              const index = results.findIndex((t) => t.id === track.id);
+              onPlayContext(results, Math.max(0, index));
+            }}
+            currentTrackId={currentTrackId}
+            isPlaying={isPlaying}
+            loading={loading}
+            hasMore={hasMore}
+            onLoadMore={() => fetchPage(page + 1)}
+            emptyMessage={
+              <div className="flex flex-col items-center gap-1">
+                <p>{loading ? "加载中..." : "输入关键词开始搜索"}</p>
+              </div>
+            }
+          />
+        )}
       </div>
     </div>
   );

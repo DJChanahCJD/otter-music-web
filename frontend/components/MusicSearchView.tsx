@@ -127,7 +127,14 @@ export function MusicSearchView({ onPlay, currentTrackId, isPlaying }: MusicSear
           loading={loading}
           hasMore={hasMore}
           onLoadMore={() => fetchPage(page + 1)}
-          emptyMessage={loading ? "搜索中..." : "输入关键词开始搜索"}
+          emptyMessage={
+            <div className="flex flex-col items-center gap-1">
+              <p>{loading ? "搜索中..." : "输入关键词开始搜索"}</p>
+              <p className="text-sm text-muted-foreground/60">
+                from GD音乐台(music.gdstudio.xyz)
+              </p>
+            </div>
+          }
         />
       </div>
     </div>
