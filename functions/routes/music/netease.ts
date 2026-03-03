@@ -14,11 +14,27 @@ import {
   getPlaylists,
   resolveUrl,
 } from '../../utils/music/netease-api';
+import type {
+    QrKeyResponse,
+    QrCheckResponse,
+    UserProfile,
+    UserPlaylist,
+    PlaylistDetail,
+    RecommendPlaylist,
+    Toplist,
+    AlbumDetail,
+    ArtistDetail,
+    ResolveUrlResult,
+    SongDetail
+} from '../../utils/music/netease-types';
 
 export const neteaseRoutes = new Hono<{ Bindings: Env }>();
 
 /**
  * 获取二维码登录所需的 key
+ * @method GET
+ * @path /login/qr/key
+ * @returns {Promise<QrKeyResponse>}
  */
 neteaseRoutes.get('/login/qr/key', async (c) => {
   try {
@@ -31,6 +47,10 @@ neteaseRoutes.get('/login/qr/key', async (c) => {
 
 /**
  * 检查二维码登录状态
+ * @method GET
+ * @path /login/qr/check
+ * @param {string} key - Query parameter, QR code key
+ * @returns {Promise<QrCheckResponse>}
  */
 neteaseRoutes.get('/login/qr/check', async (c) => {
   const key = c.req.query('key');
@@ -46,9 +66,13 @@ neteaseRoutes.get('/login/qr/check', async (c) => {
 
 /**
  * 获取我的用户信息
+ * @method POST
+ * @path /my-info
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ profile: UserProfile }>}
  */
 neteaseRoutes.post('/my-info', async (c) => {
-  const { cookie } = await c.req.json();
+  const { cookie } = await c.req.json<{ cookie: string }>();
   try {
     const res = await getMyInfo(cookie);
     return c.json(res);
@@ -59,9 +83,14 @@ neteaseRoutes.post('/my-info', async (c) => {
 
 /**
  * 获取用户歌单
+ * @method POST
+ * @path /user-playlists
+ * @body {string} userId - User ID
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ playlist: UserPlaylist[], code: number }>}
  */
 neteaseRoutes.post('/user-playlists', async (c) => {
-  const { userId, cookie } = await c.req.json();
+  const { userId, cookie } = await c.req.json<{ userId: string, cookie: string }>();
   try {
     const res = await getUserPlaylists(userId, cookie);
     return c.json(res);
@@ -72,9 +101,14 @@ neteaseRoutes.post('/user-playlists', async (c) => {
 
 /**
  * 获取歌单详情
+ * @method POST
+ * @path /playlist
+ * @body {string} playlistId - Playlist ID
+ * @body {string} cookie - User cookie
+ * @returns {Promise<PlaylistDetail>}
  */
 neteaseRoutes.post('/playlist', async (c) => {
-  const { playlistId, cookie } = await c.req.json();
+  const { playlistId, cookie } = await c.req.json<{ playlistId: string, cookie: string }>();
   try {
     const res = await getPlaylistDetail(playlistId, cookie);
     return c.json(res);
@@ -85,9 +119,13 @@ neteaseRoutes.post('/playlist', async (c) => {
 
 /**
  * 获取每日推荐歌单
+ * @method POST
+ * @path /recommend
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ result: RecommendPlaylist[] }>}
  */
 neteaseRoutes.post('/recommend', async (c) => {
-  const { cookie } = await c.req.json();
+  const { cookie } = await c.req.json<{ cookie: string }>();
   try {
     const res = await getRecommendPlaylists(cookie);
     return c.json(res);
@@ -98,9 +136,13 @@ neteaseRoutes.post('/recommend', async (c) => {
 
 /**
  * 获取排行榜
+ * @method POST
+ * @path /toplist
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ list: Toplist[] }>}
  */
 neteaseRoutes.post('/toplist', async (c) => {
-  const { cookie } = await c.req.json();
+  const { cookie } = await c.req.json<{ cookie: string }>();
   try {
     const res = await getToplist(cookie);
     return c.json(res);
@@ -111,9 +153,14 @@ neteaseRoutes.post('/toplist', async (c) => {
 
 /**
  * 获取专辑详情
+ * @method POST
+ * @path /album
+ * @body {string} id - Album ID
+ * @body {string} cookie - User cookie
+ * @returns {Promise<AlbumDetail>}
  */
 neteaseRoutes.post('/album', async (c) => {
-  const { id, cookie } = await c.req.json();
+  const { id, cookie } = await c.req.json<{ id: string, cookie: string }>();
   try {
     const res = await getAlbum(id, cookie);
     return c.json(res);
@@ -124,9 +171,14 @@ neteaseRoutes.post('/album', async (c) => {
 
 /**
  * 获取艺人详情
+ * @method POST
+ * @path /artist
+ * @body {string} id - Artist ID
+ * @body {string} cookie - User cookie
+ * @returns {Promise<ArtistDetail>}
  */
 neteaseRoutes.post('/artist', async (c) => {
-  const { id, cookie } = await c.req.json();
+  const { id, cookie } = await c.req.json<{ id: string, cookie: string }>();
   try {
     const res = await getArtist(id, cookie);
     return c.json(res);
@@ -137,9 +189,17 @@ neteaseRoutes.post('/artist', async (c) => {
 
 /**
  * 获取分类歌单
+ * @method POST
+ * @path /playlists
+ * @body {string} cat - Category
+ * @body {string} order - Order (hot/new)
+ * @body {number} limit - Limit
+ * @body {number} offset - Offset
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ playlists: UserPlaylist[] }>}
  */
 neteaseRoutes.post('/playlists', async (c) => {
-  const { cat, order, limit, offset, cookie } = await c.req.json();
+  const { cat, order, limit, offset, cookie } = await c.req.json<{ cat: string, order: string, limit: number, offset: number, cookie: string }>();
   try {
     const res = await getPlaylists(cat, order, limit, offset, cookie);
     return c.json(res);
@@ -150,9 +210,13 @@ neteaseRoutes.post('/playlists', async (c) => {
 
 /**
  * 解析 URL
+ * @method POST
+ * @path /resolve
+ * @body {string} url - NetEase Cloud Music URL
+ * @returns {Promise<ResolveUrlResult>}
  */
 neteaseRoutes.post('/resolve', async (c) => {
-  const { url } = await c.req.json();
+  const { url } = await c.req.json<{ url: string }>();
   try {
     const res = resolveUrl(url);
     if (!res) return c.json({ error: 'Invalid URL' }, 400);
@@ -162,8 +226,18 @@ neteaseRoutes.post('/resolve', async (c) => {
   }
 });
 
+/**
+ * 搜索歌曲
+ * @method POST
+ * @path /search
+ * @body {string} keyword - Search keyword
+ * @body {number} page - Page number (default: 1)
+ * @body {number} limit - Page size (default: 20)
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ items: Array, hasMore: boolean }>}
+ */
 neteaseRoutes.post('/search', async (c) => {
-  const { keyword, page, limit, cookie } = await c.req.json();
+  const { keyword, page, limit, cookie } = await c.req.json<{ keyword: string, page: number, limit: number, cookie: string }>();
 
   const name = String(keyword || '').trim();
   if (!name) return c.json({ error: 'Keyword required' }, 400);
@@ -177,7 +251,7 @@ neteaseRoutes.post('/search', async (c) => {
     const songs = res.data?.result?.songs || [];
     const songCount = res.data?.result?.songCount || 0;
 
-    const items = songs.map((s: any) => ({
+    const items = songs.map((s: SongDetail) => ({
       id: `ne_track_${s.id}`,
       name: s.name,
       artist: (s.artists || s.ar || []).map((a: any) => a.name),

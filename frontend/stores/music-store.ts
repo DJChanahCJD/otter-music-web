@@ -1,8 +1,8 @@
-import { MusicStoreData, MusicTrack, MusicSource } from "@/lib/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { v4 as uuidv4 } from 'uuid';
 import { StoreKey } from ".";
+import { MusicStoreData, MusicTrack, MusicSource } from "@shared/types";
 
 
 /**
@@ -33,75 +33,6 @@ export const buildCloudPayload = (state: MusicStoreData) => ({
   searchSource: state.searchSource,
   updatedAt: Date.now(),
 });
-
-/**
- * 合并本地和云端数据的纯函数
- */
-function mergeState(local: MusicStoreData, cloud: MusicStoreData): Partial<typeof local> {
-  if (!cloud) return local;
-
-  // 合并喜欢歌曲：去重，保留两边的数据
-  const localFavoriteIds = new Set(local.favorites.map((t: MusicTrack) => t.id));
-  const cloudFavorites = cloud.favorites || [];
-  const newFavorites = [...local.favorites];
-  
-  cloudFavorites.forEach((track: MusicTrack) => {
-    if (track && track.id && !localFavoriteIds.has(track.id)) {
-      newFavorites.push(track);
-      localFavoriteIds.add(track.id);
-    }
-  });
-
-  // 合并歌单：按 ID 匹配，合并歌曲
-  const localPlaylistsMap = new Map(local.playlists.map((p: Playlist) => [p.id, p]));
-  const cloudPlaylists = cloud.playlists || [];
-  const newPlaylists = [...local.playlists];
-  
-  cloudPlaylists.forEach((cloudPlaylist: Playlist) => {
-    if (cloudPlaylist && cloudPlaylist.id && localPlaylistsMap.has(cloudPlaylist.id)) {
-      // 歌单已存在，合并歌曲
-      const localPlaylist = localPlaylistsMap.get(cloudPlaylist.id) as Playlist;
-      if (localPlaylist && Array.isArray(localPlaylist.tracks)) {
-        const localTrackIds = new Set(localPlaylist.tracks.map((t: MusicTrack) => t.id));
-        const mergedTracks = [...localPlaylist.tracks];
-        
-        if (Array.isArray(cloudPlaylist.tracks)) {
-          cloudPlaylist.tracks.forEach((track: MusicTrack) => {
-            if (track && track.id && !localTrackIds.has(track.id)) {
-              mergedTracks.push(track);
-              localTrackIds.add(track.id);
-            }
-          });
-        }
-        
-        // 更新歌单
-        const playlistIndex = newPlaylists.findIndex(p => p.id === cloudPlaylist.id);
-        if (playlistIndex !== -1) {
-          newPlaylists[playlistIndex] = {
-            ...localPlaylist,
-            tracks: mergedTracks
-          };
-        }
-      }
-    } else if (cloudPlaylist && cloudPlaylist.id) {
-      // 歌单不存在，添加新歌单
-      newPlaylists.push(cloudPlaylist);
-      localPlaylistsMap.set(cloudPlaylist.id, cloudPlaylist);
-    }
-  });
-
-  // 合并其他设置（优先保留本地设置）
-  return {
-    ...local,
-    favorites: newFavorites,
-    playlists: newPlaylists,
-    quality: local.quality || cloud.quality || "192",
-    searchSource: local.searchSource || cloud.searchSource || "netease",
-    volume: local.volume !== undefined ? local.volume : cloud.volume || 0.7,
-    isRepeat: local.isRepeat !== undefined ? local.isRepeat : cloud.isRepeat || false,
-    isShuffle: local.isShuffle !== undefined ? local.isShuffle : cloud.isShuffle || false,
-  };
-}
 
 export interface Playlist {
   id: string;

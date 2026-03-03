@@ -1,4 +1,19 @@
 import { weapi, eapi } from './netease-crypto';
+import type {
+    NeteaseResponse,
+    QrKeyResponse,
+    QrCheckResponse,
+    UserProfile,
+    UserPlaylist,
+    PlaylistDetail,
+    SongDetail,
+    SearchResult,
+    RecommendPlaylist,
+    Toplist,
+    AlbumDetail,
+    ArtistDetail,
+    ResolveUrlResult
+} from './netease-types';
 
 // 参考项目：https://github.com/listen1
 
@@ -43,7 +58,7 @@ function buildCookie(rawCookie: string = ''): string {
     return `${baseCookies} ${finalCookie}`;
 }
 
-async function request(url: string, data: any, cookie: string = '') {
+async function request<T = any>(url: string, data: any, cookie: string = '') {
   const encData = weapi(data);
   const params = new URLSearchParams(encData as any).toString();
 
@@ -70,10 +85,10 @@ async function request(url: string, data: any, cookie: string = '') {
   const cleanedCookie = cleanCookie(setCookie);
   
   const json = await response.json();
-  return { data: json, cookie: cleanedCookie };
+  return { data: json as T, cookie: cleanedCookie };
 }
 
-async function requestEapi(url: string, path: string, data: any, cookie: string = '') {
+async function requestEapi<T = any>(url: string, path: string, data: any, cookie: string = '') {
     const encData = eapi(path, data);
     const params = new URLSearchParams(encData as any).toString();
 
@@ -96,26 +111,43 @@ async function requestEapi(url: string, path: string, data: any, cookie: string 
     }
 
     const json = await response.json();
-    return { data: json };
+    return { data: json as T };
 }
 
+/**
+ * 获取二维码登录所需的 key
+ */
 export async function getQrKey() {
     const url = `${BASE_URL}/weapi/login/qrcode/unikey`;
     const data = { type: 1 };
-    return request(url, data);
+    return request<QrKeyResponse>(url, data);
 }
 
+/**
+ * 检查二维码登录状态
+ * @param key 二维码 key
+ */
 export async function checkQrStatus(key: string) {
     const url = `${BASE_URL}/weapi/login/qrcode/client/login`;
     const data = { key, type: 1 };
-    return request(url, data);
+    return request<QrCheckResponse>(url, data);
 }
+
+/**
+ * 获取我的用户信息
+ * @param cookie 用户 cookie
+ */
 export async function getMyInfo(cookie: string) {
     const url = `${BASE_URL}/api/nuser/account/get`;
     const data = {};
-    return request(url, data, cookie);
+    return request<{ profile: UserProfile }>(url, data, cookie);
 }
 
+/**
+ * 获取用户歌单
+ * @param userId 用户 ID
+ * @param cookie 用户 cookie
+ */
 export async function getUserPlaylists(userId: string, cookie: string) {
     const url = `${BASE_URL}/api/user/playlist`;
     
@@ -140,10 +172,16 @@ export async function getUserPlaylists(userId: string, cookie: string) {
         body: params.toString()
     });
     
-    return response.json();
+    const json = await response.json();
+    return json as { playlist: UserPlaylist[], code: number };
 }
 
-export async function getPlaylistDetail(playlistId: string, cookie: string) {
+/**
+ * 获取歌单详情（包含歌曲详情）
+ * @param playlistId 歌单 ID
+ * @param cookie 用户 cookie
+ */
+export async function getPlaylistDetail(playlistId: string, cookie: string): Promise<PlaylistDetail> {
     const url = `${BASE_URL}/weapi/v3/playlist/detail`;
     const data = {
         id: playlistId,
@@ -154,7 +192,7 @@ export async function getPlaylistDetail(playlistId: string, cookie: string) {
         csrf_token: ''
     };
     
-    const res = await request(url, data, cookie);
+    const res = await request<{ playlist: any }>(url, data, cookie);
     const playlist = res.data.playlist;
     
     const trackIds = playlist.trackIds.map((t: any) => t.id);
@@ -165,13 +203,13 @@ export async function getPlaylistDetail(playlistId: string, cookie: string) {
     return {
         ...playlist,
         tracks
-    };
+    } as PlaylistDetail;
 }
 
 async function getTracksDetail(trackIds: number[], cookie: string) {
     const url = `${BASE_URL}/weapi/v3/song/detail`;
     const BATCH_SIZE = 500;
-    const result = [];
+    const result: SongDetail[] = [];
     
     for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
         const batch = trackIds.slice(i, i + BATCH_SIZE);
@@ -179,7 +217,7 @@ async function getTracksDetail(trackIds: number[], cookie: string) {
         const ids = '[' + batch.join(',') + ']';
         
         const data = { c, ids };
-        const res = await request(url, data, cookie);
+        const res = await request<{ songs: SongDetail[] }>(url, data, cookie);
         if (res.data.songs) {
             result.push(...res.data.songs);
         }
@@ -188,6 +226,14 @@ async function getTracksDetail(trackIds: number[], cookie: string) {
     return result;
 }
 
+/**
+ * 搜索歌曲
+ * @param keyword 关键词
+ * @param type 搜索类型 (1: 单曲)
+ * @param page 页码 (从 1 开始)
+ * @param limit 每页数量
+ * @param cookie 用户 cookie
+ */
 export async function search(keyword: string, type: number = 1, page: number = 1, limit: number = 20, cookie: string = '') {
     const url = `${BASE_URL}/api/search/pc`;
     const offset = (page - 1) * limit;
@@ -218,9 +264,15 @@ export async function search(keyword: string, type: number = 1, page: number = 1
     }
 
     const json = await response.json();
-    return { data: json };
+    return { data: json as { result: SearchResult, code: number } };
 }
 
+/**
+ * 获取歌曲播放 URL
+ * @param id 歌曲 ID (可带 netrack_ 前缀)
+ * @param br 码率
+ * @param cookie 用户 cookie
+ */
 export async function getSongUrl(id: string, br: number = 999000, cookie: string = '') {
     const url = `${EAPI_BASE_URL}/eapi/song/enhance/player/url`;
     const path = '/api/song/enhance/player/url';
@@ -233,9 +285,14 @@ export async function getSongUrl(id: string, br: number = 999000, cookie: string
         br: br
     };
     
-    return requestEapi(url, path, data, cookie);
+    return requestEapi<{ data: { url: string, br: number, size: number }[] }>(url, path, data, cookie);
 }
 
+/**
+ * 获取歌词
+ * @param id 歌曲 ID
+ * @param cookie 用户 cookie
+ */
 export async function getLyric(id: string, cookie: string = '') {
     const url = `${BASE_URL}/weapi/song/lyric`;
     const realId = id.replace(/^(netrack_|ne_track_)/, '');
@@ -246,9 +303,14 @@ export async function getLyric(id: string, cookie: string = '') {
         tv: -1
     };
     
-    return request(url, data, cookie);
+    return request<{ lrc: { lyric: string }, tlyric: { lyric: string } }>(url, data, cookie);
 }
 
+/**
+ * 获取单曲详情
+ * @param id 歌曲 ID
+ * @param cookie 用户 cookie
+ */
 export async function getSongDetail(id: string, cookie: string = '') {
     const realId = id.replace(/^(netrack_|ne_track_)/, '');
     // Reuse existing getTracksDetail but for single ID
@@ -256,6 +318,10 @@ export async function getSongDetail(id: string, cookie: string = '') {
     return tracks[0];
 }
 
+/**
+ * 获取每日推荐歌单
+ * @param cookie 用户 cookie
+ */
 export async function getRecommendPlaylists(cookie: string) {
     const url = `${BASE_URL}/weapi/personalized/playlist`;
     const data = {
@@ -263,29 +329,51 @@ export async function getRecommendPlaylists(cookie: string) {
         total: true,
         n: 1000
     };
-    return request(url, data, cookie);
+    return request<{ result: RecommendPlaylist[] }>(url, data, cookie);
 }
 
+/**
+ * 获取排行榜详情
+ * @param cookie 用户 cookie
+ */
 export async function getToplist(cookie: string = '') {
     const url = `${BASE_URL}/weapi/toplist/detail`;
     const data = {};
-    return request(url, data, cookie);
+    return request<{ list: Toplist[] }>(url, data, cookie);
 }
 
+/**
+ * 获取专辑详情
+ * @param id 专辑 ID
+ * @param cookie 用户 cookie
+ */
 export async function getAlbum(id: string, cookie: string = '') {
     const realId = id.replace(/^(nealbum_|ne_album_)/, '');
     const url = `${BASE_URL}/weapi/v1/album/${realId}`;
     const data = {};
-    return request(url, data, cookie);
+    return request<AlbumDetail>(url, data, cookie);
 }
 
+/**
+ * 获取艺人详情
+ * @param id 艺人 ID
+ * @param cookie 用户 cookie
+ */
 export async function getArtist(id: string, cookie: string = '') {
     const realId = id.replace(/^(neartist_|ne_artist_)/, '');
     const url = `${BASE_URL}/weapi/v1/artist/${realId}`;
     const data = {};
-    return request(url, data, cookie);
+    return request<ArtistDetail>(url, data, cookie);
 }
 
+/**
+ * 获取分类歌单
+ * @param cat 分类
+ * @param order 排序
+ * @param limit 数量
+ * @param offset 偏移
+ * @param cookie 用户 cookie
+ */
 export async function getPlaylists(cat: string = '全部', order: string = 'hot', limit: number = 35, offset: number = 0, cookie: string = '') {
     const url = `${BASE_URL}/weapi/playlist/list`;
     const data = {
@@ -295,11 +383,15 @@ export async function getPlaylists(cat: string = '全部', order: string = 'hot'
         offset,
         total: true
     };
-    return request(url, data, cookie);
+    return request<{ playlists: UserPlaylist[] }>(url, data, cookie);
 }
 
-export function resolveUrl(url: string) {
-    let result: { type: string; id: string } | null = null;
+/**
+ * 解析网易云音乐 URL
+ * @param url 网易云音乐链接
+ */
+export function resolveUrl(url: string): ResolveUrlResult | null {
+    let result: ResolveUrlResult | null = null;
     let id = '';
     
     // Cleanup URL
@@ -330,7 +422,7 @@ export function resolveUrl(url: string) {
     } else if (url.search('//music.163.com/artist') !== -1) {
         const match = /\/\/music.163.com\/artist\?id=([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-         if (id) {
+        if (id) {
             result = {
                 type: 'artist',
                 id: `neartist_${id}`
@@ -339,7 +431,7 @@ export function resolveUrl(url: string) {
     } else if (url.search('//music.163.com/album') !== -1) {
         const match = /\/\/music.163.com\/album\/([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-         if (id) {
+        if (id) {
             result = {
                 type: 'album',
                 id: `nealbum_${id}`
@@ -348,7 +440,7 @@ export function resolveUrl(url: string) {
     } else if (url.search('//music.163.com/song') !== -1) {
         const match = /\/\/music.163.com\/song\/([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-         if (id) {
+        if (id) {
             result = {
                 type: 'song',
                 id: `netrack_${id}`
@@ -358,4 +450,3 @@ export function resolveUrl(url: string) {
     
     return result;
 }
-
