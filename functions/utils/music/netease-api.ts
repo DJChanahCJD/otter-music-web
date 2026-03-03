@@ -15,88 +15,122 @@ import type {
     ResolveUrlResult
 } from './netease-types';
 
-// 参考项目：https://github.com/listen1
-
 const BASE_URL = 'https://music.163.com';
 const EAPI_BASE_URL = 'https://interface3.music.163.com';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// 区分 PC 端和移动端 UA，EAPI 用移动端存活率更高
+const PC_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const MOBILE_USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.27';
+
+/* =========================================================
+ * 核心伪装工具集 (Cookie & IP)
+ * ========================================================= */
+
+// 生成随机国内民用 IP (如广东电信) 用于穿透 Cloudflare 机房限制
+function getRandomDomesticIp(): string {
+    return `113.108.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+}
+
+// 随机生成 16 进制秘钥
+function createSecretKey(size: number): string {
+    const choice = '012345679abcdef'.split('');
+    let result = '';
+    for (let i = 0; i < size; i++) {
+        result += choice[Math.floor(Math.random() * choice.length)];
+    }
+    return result;
+}
+
+// 构造网易云游客 Cookie (参考 Listen1 源码，这对防 403 极其重要)
+function buildVisitorCookie(): string {
+    const nuid = createSecretKey(32);
+    const nnid = `${nuid},${Date.now()}`;
+    return `_ntes_nuid=${nuid}; _ntes_nnid3=${nnid}; NMTID=0;`;
+}
 
 function cleanCookie(cookieStr: string | null): string {
     if (!cookieStr) return '';
-    
-    // Split by comma or semicolon to handle multiple cookies and merged headers
     const parts = cookieStr.split(/[,;]\s*/);
     const cookieMap = new Map<string, string>();
-    const ignoredKeys = new Set([
-        'expires', 'max-age', 'domain', 'path', 'httponly', 'secure', 'samesite', 'priority'
-    ]);
+    const ignoredKeys = new Set(['expires', 'max-age', 'domain', 'path', 'httponly', 'secure', 'samesite', 'priority']);
 
     for (const part of parts) {
         const match = part.match(/^([^=]+)=(.*)$/);
         if (match) {
             const key = match[1].trim();
             const value = match[2].trim();
-            if (key && !ignoredKeys.has(key.toLowerCase())) {
-                cookieMap.set(key, value);
-            }
+            if (key && !ignoredKeys.has(key.toLowerCase())) cookieMap.set(key, value);
         }
     }
-    
     return Array.from(cookieMap.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
+// 构建最终请求 Cookie
 function buildCookie(rawCookie: string = ''): string {
-    const baseCookies = 'os=pc; appver=2.9.7; mode=31;';
     let finalCookie = rawCookie.trim();
     
-    if (finalCookie && !finalCookie.includes('=')) {
+    // 如果没有用户 Cookie，强制注入游客 Cookie 伪装身份
+    if (!finalCookie) {
+        finalCookie = buildVisitorCookie();
+    } else if (!finalCookie.includes('=')) {
         finalCookie = `MUSIC_U=${finalCookie}`;
     } else {
         finalCookie = cleanCookie(finalCookie);
     }
     
-    return `${baseCookies} ${finalCookie}`;
+    return `os=pc; appver=2.9.7; mode=31; ${finalCookie}`;
 }
 
-async function request<T = any>(url: string, data: any, cookie: string = '') {
-  const encData = weapi(data);
-  const params = new URLSearchParams(encData as any).toString();
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'User-Agent': USER_AGENT,
-    'Referer': BASE_URL,
-    'Origin': BASE_URL,
-    'Cookie': buildCookie(cookie)
-  };
+/* =========================================================
+ * 底层请求函数 (双轨制)
+ * ========================================================= */
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: params,
-  });
-
-  if (!response.ok) {
-    throw new Error(`NetEase API Error: ${response.status} ${response.statusText}`);
-  }
-  
-  // Extract Set-Cookie
-  const setCookie = response.headers.get('set-cookie');
-  const cleanedCookie = cleanCookie(setCookie);
-  
-  const json = await response.json();
-  return { data: json as T, cookie: cleanedCookie };
-}
-
-async function requestEapi<T = any>(url: string, path: string, data: any, cookie: string = '') {
-    const encData = eapi(path, data);
+/**
+ * 1. 标准 WEAPI 请求函数 (Web 端专用，兼容性极高)
+ */
+async function requestWeapi<T = any>(url: string, data: any, cookie: string = '') {
+    const encData = weapi(data);
     const params = new URLSearchParams(encData as any).toString();
+    const fakeIp = getRandomDomesticIp();
 
     const headers: Record<string, string> = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': USER_AGENT,
+        'User-Agent': PC_USER_AGENT,
         'Referer': BASE_URL,
         'Origin': BASE_URL,
+        'X-Real-IP': fakeIp,
+        'X-Forwarded-For': fakeIp,
+        'Cookie': buildCookie(cookie)
+    };
+
+    const response = await fetch(url, { method: 'POST', headers, body: params });
+
+    if (!response.ok) {
+        throw new Error(`NetEase WEAPI Error: ${response.status}`);
+    }
+    
+    const setCookie = response.headers.get('set-cookie');
+    const cleanedCookie = cleanCookie(setCookie);
+    const json = await response.json();
+    return { data: json as T, cookie: cleanedCookie };
+}
+
+/**
+ * 2. 增强型 EAPI 请求函数 (移动端专用，带 IP 穿透和防缓存)
+ */
+async function requestEapi<T = any>(url: string, path: string, data: any, cookie: string = '') {
+    const encData = eapi(path, data);
+    const params = new URLSearchParams(encData as any).toString();
+    const fakeIp = getRandomDomesticIp();
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': MOBILE_USER_AGENT,
+        'Referer': BASE_URL,
+        'Origin': BASE_URL,
+        'X-Real-IP': fakeIp,
+        'X-Forwarded-For': fakeIp,
         'Cookie': buildCookie(cookie)
     };
 
@@ -104,106 +138,101 @@ async function requestEapi<T = any>(url: string, path: string, data: any, cookie
         method: 'POST',
         headers,
         body: params,
-    });
+        cf: { cacheTtl: 0, cacheEverything: false } // 禁用 CF 缓存以保证 IP 伪装有效
+    } as any);
 
     if (!response.ok) {
-        throw new Error(`NetEase EAPI Error: ${response.status} ${response.statusText}`);
+        throw new Error(`NetEase EAPI Error: ${response.status}`);
     }
 
     const json = await response.json();
     return { data: json as T };
 }
 
+
+/* =========================================================
+ * 业务 API
+ * ========================================================= */
+
 /**
- * 获取二维码登录所需的 key
+ * 获取歌曲播放 URL (核心：EAPI/WEAPI 双轨降级)
  */
+export async function getSongUrl(id: string, br: number = 999000, cookie: string = '') {
+    const realId = id.replace(/^(netrack_|ne_track_)/, '');
+    
+    // 方案 1: 尝试 EAPI (获取无损/高解析度音频)
+    try {
+        const eapiRes = await requestEapi<{ data: { url: string, br: number, size: number }[] }>(
+            `${EAPI_BASE_URL}/eapi/song/enhance/player/url`,
+            '/api/song/enhance/player/url',
+            { ids: `[${realId}]`, br, header: { os: 'pc', appver: '2.9.7' } },
+            cookie
+        );
+        
+        if (eapiRes.data?.[0]?.url) return eapiRes;
+        console.warn(`[NetEase] EAPI empty URL for ${realId}, falling back to WEAPI...`);
+    } catch (e) {
+        console.warn(`[NetEase] EAPI failed for ${realId}:`, e);
+    }
+
+    // 方案 2: 降级 WEAPI (Web 端接口风控极松，确保能播)
+    const weapiData = {
+        ids: `[${realId}]`,
+        level: br >= 320000 ? 'higher' : 'standard',
+        encodeType: 'mp3',
+        csrf_token: ''
+    };
+    
+    return requestWeapi<{ data: { url: string, br: number, size: number }[] }>(
+        `${BASE_URL}/weapi/song/enhance/player/url/v1`,
+        weapiData,
+        cookie
+    );
+}
+
+// ---------- 下方全线使用 requestWeapi 替代原本脆弱的 request ----------
+
 export async function getQrKey() {
-    const url = `${BASE_URL}/weapi/login/qrcode/unikey`;
-    const data = { type: 1 };
-    return request<QrKeyResponse>(url, data);
+    return requestWeapi<QrKeyResponse>(`${BASE_URL}/weapi/login/qrcode/unikey`, { type: 1 });
 }
 
-/**
- * 检查二维码登录状态
- * @param key 二维码 key
- */
 export async function checkQrStatus(key: string) {
-    const url = `${BASE_URL}/weapi/login/qrcode/client/login`;
-    const data = { key, type: 1 };
-    return request<QrCheckResponse>(url, data);
+    return requestWeapi<QrCheckResponse>(`${BASE_URL}/weapi/login/qrcode/client/login`, { key, type: 1 });
 }
 
-/**
- * 获取我的用户信息
- * @param cookie 用户 cookie
- */
 export async function getMyInfo(cookie: string) {
-    const url = `${BASE_URL}/api/nuser/account/get`;
-    const data = {};
-    return request<{ profile: UserProfile }>(url, data, cookie);
+    return requestWeapi<{ profile: UserProfile }>(`${BASE_URL}/api/nuser/account/get`, {}, cookie);
 }
 
-/**
- * 获取用户歌单
- * @param userId 用户 ID
- * @param cookie 用户 cookie
- */
 export async function getUserPlaylists(userId: string, cookie: string) {
     const url = `${BASE_URL}/api/user/playlist`;
-    
-    const params = new URLSearchParams({
-        uid: userId,
-        limit: '1000',
-        offset: '0',
-        includeVideo: 'true'
-    });
+    const params = new URLSearchParams({ uid: userId, limit: '1000', offset: '0', includeVideo: 'true' });
+    const fakeIp = getRandomDomesticIp();
 
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': USER_AGENT,
+        'User-Agent': PC_USER_AGENT,
         'Referer': BASE_URL,
         'Origin': BASE_URL,
+        'X-Real-IP': fakeIp,
+        'X-Forwarded-For': fakeIp,
         'Cookie': buildCookie(cookie)
     };
     
-    const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: params.toString()
-    });
-    
+    const response = await fetch(url, { method: 'POST', headers, body: params.toString() });
     const json = await response.json();
     return json as { playlist: UserPlaylist[], code: number };
 }
 
-/**
- * 获取歌单详情（包含歌曲详情）
- * @param playlistId 歌单 ID
- * @param cookie 用户 cookie
- */
 export async function getPlaylistDetail(playlistId: string, cookie: string): Promise<PlaylistDetail> {
-    const url = `${BASE_URL}/weapi/v3/playlist/detail`;
-    const data = {
-        id: playlistId,
-        offset: 0,
-        total: true,
-        limit: 1000,
-        n: 1000,
-        csrf_token: ''
-    };
+    const data = { id: playlistId, offset: 0, total: true, limit: 1000, n: 1000, csrf_token: '' };
+    const res = await requestWeapi<{ playlist: any }>(`${BASE_URL}/weapi/v3/playlist/detail`, data, cookie);
     
-    const res = await request<{ playlist: any }>(url, data, cookie);
     const playlist = res.data.playlist;
-    
     const trackIds = playlist.trackIds.map((t: any) => t.id);
-    
-    // Batch fetch details
     const tracks = await getTracksDetail(trackIds, cookie);
     
-    return {
-        ...playlist,
-        tracks
-    } as PlaylistDetail;
+    return { ...playlist, tracks } as PlaylistDetail;
 }
 
 async function getTracksDetail(trackIds: number[], cookie: string) {
@@ -216,185 +245,84 @@ async function getTracksDetail(trackIds: number[], cookie: string) {
         const c = '[' + batch.map(id => `{"id":${id}}`).join(',') + ']';
         const ids = '[' + batch.join(',') + ']';
         
-        const data = { c, ids };
-        const res = await request<{ songs: SongDetail[] }>(url, data, cookie);
-        if (res.data.songs) {
-            result.push(...res.data.songs);
-        }
+        const res = await requestWeapi<{ songs: SongDetail[] }>(url, { c, ids }, cookie);
+        if (res.data.songs) result.push(...res.data.songs);
     }
-    
     return result;
 }
 
-/**
- * 搜索歌曲
- * @param keyword 关键词
- * @param type 搜索类型 (1: 单曲)
- * @param page 页码 (从 1 开始)
- * @param limit 每页数量
- * @param cookie 用户 cookie
- */
 export async function search(keyword: string, type: number = 1, page: number = 1, limit: number = 20, cookie: string = '') {
-    const url = `${BASE_URL}/api/search/pc`;
     const offset = (page - 1) * limit;
-
+    const fakeIp = getRandomDomesticIp();
+    
     const headers: Record<string, string> = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': USER_AGENT,
+        'User-Agent': PC_USER_AGENT,
         'Referer': BASE_URL,
         'Origin': BASE_URL,
+        'X-Real-IP': fakeIp,
+        'X-Forwarded-For': fakeIp,
         'Cookie': buildCookie(cookie)
     };
 
-    const params = new URLSearchParams({
-        s: keyword,
-        type: String(type),
-        offset: String(offset),
-        limit: String(limit)
-    });
+    const params = new URLSearchParams({ s: keyword, type: String(type), offset: String(offset), limit: String(limit) });
+    const response = await fetch(`${BASE_URL}/api/search/pc`, { method: 'POST', headers, body: params.toString() });
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: params.toString()
-    });
-
-    if (!response.ok) {
-        throw new Error(`NetEase Search API Error: ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`NetEase Search API Error: ${response.status}`);
     const json = await response.json();
     return { data: json as { result: SearchResult, code: number } };
 }
 
-/**
- * 获取歌曲播放 URL
- * @param id 歌曲 ID (可带 netrack_ 前缀)
- * @param br 码率
- * @param cookie 用户 cookie
- */
-export async function getSongUrl(id: string, br: number = 999000, cookie: string = '') {
-    const url = `${EAPI_BASE_URL}/eapi/song/enhance/player/url`;
-    const path = '/api/song/enhance/player/url';
-    
-    // id might be 'netrack_123' or 'ne_track_123', need to strip prefix
-    const realId = id.replace(/^(netrack_|ne_track_)/, '');
-    
-    const data = {
-        ids: `[${realId}]`,
-        br: br
-    };
-    
-    return requestEapi<{ data: { url: string, br: number, size: number }[] }>(url, path, data, cookie);
-}
-
-/**
- * 获取歌词
- * @param id 歌曲 ID
- * @param cookie 用户 cookie
- */
 export async function getLyric(id: string, cookie: string = '') {
-    const url = `${BASE_URL}/weapi/song/lyric`;
     const realId = id.replace(/^(netrack_|ne_track_)/, '');
-    
-    const data = {
-        id: realId,
-        lv: -1,
-        tv: -1
-    };
-    
-    return request<{ lrc: { lyric: string }, tlyric: { lyric: string } }>(url, data, cookie);
+    return requestWeapi<{ lrc: { lyric: string }, tlyric: { lyric: string } }>(
+        `${BASE_URL}/weapi/song/lyric`, 
+        { id: realId, lv: -1, tv: -1 }, 
+        cookie
+    );
 }
 
-/**
- * 获取单曲详情
- * @param id 歌曲 ID
- * @param cookie 用户 cookie
- */
 export async function getSongDetail(id: string, cookie: string = '') {
     const realId = id.replace(/^(netrack_|ne_track_)/, '');
-    // Reuse existing getTracksDetail but for single ID
     const tracks = await getTracksDetail([parseInt(realId)], cookie);
     return tracks[0];
 }
 
-/**
- * 获取每日推荐歌单
- * @param cookie 用户 cookie
- */
 export async function getRecommendPlaylists(cookie: string) {
-    const url = `${BASE_URL}/weapi/personalized/playlist`;
-    const data = {
-        limit: 20,
-        total: true,
-        n: 1000
-    };
-    return request<{ result: RecommendPlaylist[] }>(url, data, cookie);
+    return requestWeapi<{ result: RecommendPlaylist[] }>(
+        `${BASE_URL}/weapi/personalized/playlist`, 
+        { limit: 20, total: true, n: 1000 }, 
+        cookie
+    );
 }
 
-/**
- * 获取排行榜详情
- * @param cookie 用户 cookie
- */
 export async function getToplist(cookie: string = '') {
-    const url = `${BASE_URL}/weapi/toplist/detail`;
-    const data = {};
-    return request<{ list: Toplist[] }>(url, data, cookie);
+    return requestWeapi<{ list: Toplist[] }>(`${BASE_URL}/weapi/toplist/detail`, {}, cookie);
 }
 
-/**
- * 获取专辑详情
- * @param id 专辑 ID
- * @param cookie 用户 cookie
- */
 export async function getAlbum(id: string, cookie: string = '') {
     const realId = id.replace(/^(nealbum_|ne_album_)/, '');
-    const url = `${BASE_URL}/weapi/v1/album/${realId}`;
-    const data = {};
-    return request<AlbumDetail>(url, data, cookie);
+    return requestWeapi<AlbumDetail>(`${BASE_URL}/weapi/v1/album/${realId}`, {}, cookie);
 }
 
-/**
- * 获取艺人详情
- * @param id 艺人 ID
- * @param cookie 用户 cookie
- */
 export async function getArtist(id: string, cookie: string = '') {
     const realId = id.replace(/^(neartist_|ne_artist_)/, '');
-    const url = `${BASE_URL}/weapi/v1/artist/${realId}`;
-    const data = {};
-    return request<ArtistDetail>(url, data, cookie);
+    return requestWeapi<ArtistDetail>(`${BASE_URL}/weapi/v1/artist/${realId}`, {}, cookie);
 }
 
-/**
- * 获取分类歌单
- * @param cat 分类
- * @param order 排序
- * @param limit 数量
- * @param offset 偏移
- * @param cookie 用户 cookie
- */
 export async function getPlaylists(cat: string = '全部', order: string = 'hot', limit: number = 35, offset: number = 0, cookie: string = '') {
-    const url = `${BASE_URL}/weapi/playlist/list`;
-    const data = {
-        cat,
-        order,
-        limit,
-        offset,
-        total: true
-    };
-    return request<{ playlists: UserPlaylist[] }>(url, data, cookie);
+    return requestWeapi<{ playlists: UserPlaylist[] }>(
+        `${BASE_URL}/weapi/playlist/list`, 
+        { cat, order, limit, offset, total: true }, 
+        cookie
+    );
 }
 
-/**
- * 解析网易云音乐 URL
- * @param url 网易云音乐链接
- */
 export function resolveUrl(url: string): ResolveUrlResult | null {
+    // 逻辑保持不变...
     let result: ResolveUrlResult | null = null;
     let id = '';
     
-    // Cleanup URL
     url = url.replace('music.163.com/#/discover/toplist?', 'music.163.com/#/playlist?');
     url = url.replace('music.163.com/#/my/m/music/', 'music.163.com/');
     url = url.replace('music.163.com/#/m/', 'music.163.com/');
@@ -405,47 +333,26 @@ export function resolveUrl(url: string): ResolveUrlResult | null {
         name = name.replace(/[\[\]]/g, '\\$&');
         const regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
         const results = regex.exec(url);
-        if (!results) return '';
-        if (!results[2]) return '';
+        if (!results || !results[2]) return '';
         return decodeURIComponent(results[2].replace(/\+/g, ' '));
     };
 
     if (url.search('//music.163.com/playlist') !== -1) {
         const match = /\/\/music.163.com\/playlist\/([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-        if (id) {
-            result = {
-                type: 'playlist',
-                id: `neplaylist_${id}`
-            };
-        }
+        if (id) result = { type: 'playlist', id: `neplaylist_${id}` };
     } else if (url.search('//music.163.com/artist') !== -1) {
         const match = /\/\/music.163.com\/artist\?id=([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-        if (id) {
-            result = {
-                type: 'artist',
-                id: `neartist_${id}`
-            };
-        }
+        if (id) result = { type: 'artist', id: `neartist_${id}` };
     } else if (url.search('//music.163.com/album') !== -1) {
         const match = /\/\/music.163.com\/album\/([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-        if (id) {
-            result = {
-                type: 'album',
-                id: `nealbum_${id}`
-            };
-        }
+        if (id) result = { type: 'album', id: `nealbum_${id}` };
     } else if (url.search('//music.163.com/song') !== -1) {
         const match = /\/\/music.163.com\/song\/([0-9]+)/.exec(url);
         id = match ? match[1] : getParameterByName('id', url);
-        if (id) {
-            result = {
-                type: 'song',
-                id: `netrack_${id}`
-            };
-        }
+        if (id) result = { type: 'song', id: `netrack_${id}` };
     }
     
     return result;
