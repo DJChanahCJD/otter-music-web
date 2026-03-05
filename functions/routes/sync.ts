@@ -7,375 +7,193 @@ import { authMiddleware } from "middleware/auth";
 import { SYNC_KEY_PREFIX, SyncKeyMetadata } from "@shared/types";
 
 /** ===============================
- *  Otter Music Sync (API-Key Model)
- *  一个 key = 一个同步空间
- *  =============================== */
+ * Otter Music Sync (API-Key Model)
+ * 一个 key = 一个同步空间
+ * =============================== */
 
-
-export const syncRoutes = new Hono<{ Bindings: Env }>();
-
-/* ---------------- 工具函数 ---------------- */
-
-/** 拼接 KV key */
-function getSyncKey(syncKey: string): string {
-  return `${SYNC_KEY_PREFIX}${syncKey}`;
-}
-
-/** 严格解析 Bearer */
-function getBearer(c: any): string | null {
-  const auth = c.req.header("Authorization");
-  if (!auth) return null;
-
-  const match = auth.match(/^Bearer ([A-Za-z0-9_-]+)$/);
-  return match?.[1] ?? null;
-}
-
-/** 易读字符集（排除 0O1Il 避免混淆） */
-const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-/** 生成指定长度的随机码 */
-function randomCode(length = 16): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += ALPHABET[bytes[i] % ALPHABET.length];
-  }
-  return result;
-}
-
-/** 生成同步 key，支持可选前缀 */
-function generateKey(prefix?: string): string {
-  const code = randomCode(16);
-  return prefix ? `${prefix}_${code}` : code;
-}
-
-/** prefix 校验 schema */
-const prefixSchema = z
-  .string()
-  .min(1)
-  .max(20)
-  .regex(/^[a-z0-9_-]+$/i);
+type Variables = { syncKey: string; kvKey: string };
+export const syncRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-type SyncRecord = {
-  id: string;
-  update_time: number;
-  is_deleted: boolean;
-} & Record<string, any>;
+type SyncRecord = { id: string; update_time: number; is_deleted: boolean } & Record<string, any>;
+type SyncPlaylist = SyncRecord & { tracks: SyncRecord[] };
 
-type SyncPlaylist = SyncRecord & {
-  tracks: SyncRecord[];
+/* ---------------- 核心工具函数 ---------------- */
+
+// 1. 生成不混淆的随机同步码
+const generateKey = (prefix?: string) => {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const code = Array.from(bytes).map(b => ALPHABET[b % ALPHABET.length]).join("");
+  return prefix ? `${prefix}_${code}` : code;
 };
 
-function normalizeUpdateTime(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
-  return value;
-}
+// 2. 极简的数据清洗器 (防御性编程，容错所有脏数据)
+const sanitizeRecord = (v: any): SyncRecord | null => 
+  (v?.id && typeof v.id === "string" ? { ...v, update_time: Number.isFinite(v.update_time) ? v.update_time : 0, is_deleted: Boolean(v.is_deleted) } : null);
 
-function normalizeIsDeleted(value: unknown): boolean {
-  return typeof value === "boolean" ? value : false;
-}
+const sanitizeList = <T>(v: any): T[] => (Array.isArray(v) ? (v.map(sanitizeRecord).filter(Boolean) as unknown as T[]) : []);
 
-function toObject(value: unknown): Record<string, any> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, any>;
-}
-
-function sanitizeRecord(value: unknown): SyncRecord | null {
-  const raw = toObject(value);
-  if (typeof raw.id !== "string" || !raw.id.trim()) return null;
-  return {
-    ...raw,
-    update_time: normalizeUpdateTime(raw.update_time),
-    is_deleted: normalizeIsDeleted(raw.is_deleted),
-  };
-}
-
-function sanitizeRecordList(value: unknown): SyncRecord[] {
-  if (!Array.isArray(value)) return [];
-  const records: SyncRecord[] = [];
-  for (const item of value) {
-    const record = sanitizeRecord(item);
-    if (record) records.push(record);
-  }
-  return records;
-}
-
-function sanitizePlaylist(value: unknown): SyncPlaylist | null {
-  const playlist = sanitizeRecord(value);
-  if (!playlist) return null;
-  return {
-    ...playlist,
-    tracks: sanitizeRecordList((playlist as Record<string, any>).tracks),
-  };
-}
-
-function sanitizePlaylistList(value: unknown): SyncPlaylist[] {
-  if (!Array.isArray(value)) return [];
-  const playlists: SyncPlaylist[] = [];
-  for (const item of value) {
-    const playlist = sanitizePlaylist(item);
-    if (playlist) playlists.push(playlist);
-  }
-  return playlists;
-}
-
-function sanitizeSyncData(value: unknown): Record<string, any> & {
-  favorites: SyncRecord[];
-  playlists: SyncPlaylist[];
-} {
-  const data = toObject(value);
-  return {
-    ...data,
-    favorites: sanitizeRecordList(data.favorites),
-    playlists: sanitizePlaylistList(data.playlists),
-  };
-}
-
-function shouldGcRecord(record: SyncRecord, now: number): boolean {
-  return record.is_deleted && now - record.update_time > TOMBSTONE_TTL_MS;
-}
-
-function gcSyncData(data: ReturnType<typeof sanitizeSyncData>, now: number) {
-  const favorites = data.favorites.filter((item) => !shouldGcRecord(item, now));
-  const playlists: SyncPlaylist[] = [];
-
-  for (const playlist of data.playlists) {
-    if (shouldGcRecord(playlist, now)) continue;
-    playlists.push({
-      ...playlist,
-      tracks: playlist.tracks.filter((track) => !shouldGcRecord(track, now)),
-    });
-  }
-
-  return {
-    ...data,
-    favorites,
-    playlists,
-  };
-}
-
-function parseStoredData(raw: string | null): unknown {
-  if (raw === null || raw === "") return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function selectLwwRecord(serverRecord: SyncRecord, clientRecord: SyncRecord): SyncRecord {
-  if (clientRecord.update_time > serverRecord.update_time) return clientRecord;
-  return serverRecord;
-}
-
-function mergeRecordList(serverRecords: SyncRecord[], clientRecords: SyncRecord[]): SyncRecord[] {
-  const mergedMap = new Map<string, SyncRecord>();
-  const order: string[] = [];
-
-  for (const record of serverRecords) {
-    mergedMap.set(record.id, record);
-    order.push(record.id);
-  }
-
-  for (const record of clientRecords) {
-    const existing = mergedMap.get(record.id);
-    if (!existing) {
-      mergedMap.set(record.id, record);
-      order.push(record.id);
-      continue;
-    }
-    mergedMap.set(record.id, selectLwwRecord(existing, record));
-  }
-
-  return order.map((id) => mergedMap.get(id)!);
-}
-
-function mergePlaylistList(serverPlaylists: SyncPlaylist[], clientPlaylists: SyncPlaylist[]): SyncPlaylist[] {
-  const mergedMap = new Map<string, SyncPlaylist>();
-  const order: string[] = [];
-
-  for (const playlist of serverPlaylists) {
-    mergedMap.set(playlist.id, playlist);
-    order.push(playlist.id);
-  }
-
-  for (const playlist of clientPlaylists) {
-    const existing = mergedMap.get(playlist.id);
-    if (!existing) {
-      mergedMap.set(playlist.id, playlist);
-      order.push(playlist.id);
-      continue;
-    }
-    const mergedTracks = mergeRecordList(existing.tracks, playlist.tracks);
-    const winner = selectLwwRecord(existing, playlist) as SyncPlaylist;
-    mergedMap.set(playlist.id, {
-      ...winner,
-      tracks: mergedTracks,
-    });
-  }
-
-  return order.map((id) => mergedMap.get(id)!);
-}
-
-function mergeSyncData(
-  serverData: ReturnType<typeof sanitizeSyncData>,
-  clientData: ReturnType<typeof sanitizeSyncData>,
-) {
-  return {
-    ...serverData,
-    ...clientData,
-    favorites: mergeRecordList(serverData.favorites, clientData.favorites),
-    playlists: mergePlaylistList(serverData.playlists, clientData.playlists),
-  };
-}
-
-/* ===============================
- * GET /sync/check  检查同步状态
- * =============================== */
-syncRoutes.get("/check", async (c) => {
-  const syncKey = getBearer(c);
-  if (!syncKey) return fail(c, "Invalid Authorization", 401);
-
-  const kv = c.env.oh_file_url;
-  const kvKey = getSyncKey(syncKey);
-
-  const { metadata } = await kv.getWithMetadata<SyncKeyMetadata>(kvKey);
-
-  if (metadata === null) {
-    return fail(c, "Sync key not found", 404);
-  }
-
-  return ok(c, {
-    lastSyncTime: metadata?.lastSyncTime ?? 0,
-  });
+const sanitizeSyncData = (v: any) => ({
+  ...(typeof v === "object" && v ? v : {}),
+  favorites: sanitizeList<SyncRecord>(v?.favorites),
+  playlists: sanitizeList<SyncPlaylist>(v?.playlists).map(p => ({ ...p, tracks: sanitizeList<SyncRecord>(p.tracks) }))
 });
 
-/* ===============================
- * GET /sync  拉取数据
- * =============================== */
-syncRoutes.get("/", async (c) => {
-  const syncKey = getBearer(c);
-  if (!syncKey) return fail(c, "Invalid Authorization", 401);
+// 3. 泛型 LWW 增量合并算法
+function mergeLWW<T extends SyncRecord>(server: T[], client: T[], mergeChildren?: (s: T, c: T) => T): T[] {
+  const map = new Map<string, T>(server.map(item => [item.id, item]));
+  const order = server.map(item => item.id);
 
+  for (const c of client) {
+    const s = map.get(c.id);
+    if (!s) {
+      map.set(c.id, c);
+      order.push(c.id);
+    } else {
+      const winner = c.update_time > s.update_time ? c : s;
+      const merged = mergeChildren ? mergeChildren(s, c) : winner;
+      map.set(c.id, { ...merged, update_time: winner.update_time, is_deleted: winner.is_deleted });
+    }
+  }
+  return order.map(id => map.get(id)!);
+}
+
+// 4. 垃圾回收 (伴随计数器提升性能)
+function gcSyncData(data: ReturnType<typeof sanitizeSyncData>, now: number) {
+  let gcCount = 0;
+  const gc = <T extends SyncRecord>(list: T[]) => list.filter(r => {
+    const isExpired = r.is_deleted && now - r.update_time > TOMBSTONE_TTL_MS;
+    if (isExpired) gcCount++;
+    return !isExpired;
+  });
+
+  return {
+    gcCount,
+    cleanedData: {
+      ...data,
+      favorites: gc(data.favorites),
+      playlists: gc(data.playlists).map(p => ({ ...p, tracks: gc(p.tracks) }))
+    }
+  };
+}
+
+/* ---------------- 路由鉴权中间件 ---------------- */
+
+const syncAuthMiddleware = async (c: any, next: Function) => {
+  const match = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]+)$/);
+  if (!match) return fail(c, "Invalid Authorization", 401);
+  c.set("syncKey", match[1]);
+  c.set("kvKey", `${SYNC_KEY_PREFIX}${match[1]}`);
+  await next();
+};
+
+/* ===============================
+ * 客户端 API (应用 syncAuthMiddleware)
+ * =============================== */
+
+syncRoutes.use("/", syncAuthMiddleware);
+syncRoutes.use("/check", syncAuthMiddleware);
+
+syncRoutes.get("/check", async (c) => {
+  const { metadata } = await c.env.oh_file_url.getWithMetadata<SyncKeyMetadata>(c.get("kvKey"));
+  if (metadata === null) return fail(c, "Sync key not found", 404);
+  return ok(c, { lastSyncTime: metadata?.lastSyncTime ?? 0 });
+});
+
+syncRoutes.get("/", async (c) => {
   const kv = c.env.oh_file_url;
-  const kvKey = getSyncKey(syncKey);
+  const kvKey = c.get("kvKey");
 
   const { value, metadata } = await kv.getWithMetadata<SyncKeyMetadata>(kvKey);
-
-  if (value === null) {
-    return fail(c, "Sync key not found", 404);
-  }
+  if (value === null) return fail(c, "Sync key not found", 404);
 
   const serverTime = metadata?.lastSyncTime ?? 0;
-  const now = Date.now();
-  const sanitizedData = sanitizeSyncData(parseStoredData(value));
-  const gcData = gcSyncData(sanitizedData, now);
+  const parsedData = value ? JSON.parse(value) : {};
+  const { cleanedData, gcCount } = gcSyncData(sanitizeSyncData(parsedData), Date.now());
 
-  if (JSON.stringify(gcData) !== JSON.stringify(sanitizedData)) {
-    await kv.put(kvKey, JSON.stringify(gcData), {
+  // 如果触发了 GC 删除，保存最新的干净状态（避免高成本的 JSON.stringify Diff）
+  if (gcCount > 0) {
+    await kv.put(kvKey, JSON.stringify(cleanedData), {
       metadata: { lastSyncTime: serverTime } satisfies SyncKeyMetadata,
     });
   }
 
-  return ok(c, {
-    data: gcData,
-    lastSyncTime: serverTime,
-  });
+  return ok(c, { data: cleanedData, lastSyncTime: serverTime });
 });
 
-/* ===============================
- * POST /sync  推送数据
- * 记录级 LWW 合并
- * =============================== */
 syncRoutes.post(
   "/",
-  zValidator(
-    "json",
-    z.object({
-      data: z.any(),
-      lastSyncTime: z.number().optional(),
-    }),
-  ),
+  zValidator("json", z.object({ data: z.any(), lastSyncTime: z.number().optional() })),
   async (c) => {
-    const syncKey = getBearer(c);
-    if (!syncKey) return fail(c, "Invalid Authorization", 401);
-
     const kv = c.env.oh_file_url;
-    const kvKey = getSyncKey(syncKey);
+    const kvKey = c.get("kvKey");
+    const { data: clientRawData } = c.req.valid("json");
 
-    const body = c.req.valid("json");
-
-    const existing = await kv.getWithMetadata<SyncKeyMetadata>(kvKey);
-
-    if (existing.value === null) {
-      return fail(c, "Sync key not found", 404);
-    }
+    const existing = await kv.get(kvKey);
+    if (existing === null) return fail(c, "Sync key not found", 404);
 
     const now = Date.now();
-    const serverData = gcSyncData(sanitizeSyncData(parseStoredData(existing.value)), now);
-    const clientData = gcSyncData(sanitizeSyncData(body.data), now);
-    const mergedData = mergeSyncData(serverData, clientData);
+    const serverData = gcSyncData(sanitizeSyncData(existing ? JSON.parse(existing) : {}), now).cleanedData;
+    const clientData = gcSyncData(sanitizeSyncData(clientRawData), now).cleanedData;
 
-    const newTime = Date.now();
+    // LWW 增量合并
+    const mergedData = {
+      ...serverData,
+      ...clientData,
+      favorites: mergeLWW(serverData.favorites, clientData.favorites),
+      playlists: mergeLWW(serverData.playlists, clientData.playlists, (s, c) => ({
+        ...c, // 歌单元数据由最新的决定
+        tracks: mergeLWW(s.tracks, c.tracks) // Tracks 单独做增量合并
+      })),
+    };
 
     await kv.put(kvKey, JSON.stringify(mergedData), {
-      metadata: { lastSyncTime: newTime } satisfies SyncKeyMetadata,
+      metadata: { lastSyncTime: now } satisfies SyncKeyMetadata,
     });
 
-    return ok(c, { lastSyncTime: newTime }, "Sync successful");
-  },
+    return ok(c, { lastSyncTime: now }, "Sync successful");
+  }
 );
 
 /* ===============================
- * POST /create-key  管理员创建同步空间
+ * 管理端 API (应用 authMiddleware)
  * =============================== */
+
 syncRoutes.post(
   "/create-key",
   authMiddleware,
-  zValidator(
-    "json",
-    z.object({
-      prefix: prefixSchema.optional(),
-    }),
-  ),
+  zValidator("json", z.object({ prefix: z.string().min(1).max(20).regex(/^[a-z0-9_-]+$/i).optional() })),
   async (c) => {
     const { prefix } = c.req.valid("json");
     const kv = c.env.oh_file_url;
 
+    // 重试 5 次生成唯一 Key
     for (let i = 0; i < 5; i++) {
       const syncKey = generateKey(prefix);
-      const kvKey = getSyncKey(syncKey);
-
-      const exists = await kv.get(kvKey);
-      if (!exists) {
-        await kv.put(kvKey, "", {
-          metadata: { lastSyncTime: 0 },
-        });
+      const kvKey = `${SYNC_KEY_PREFIX}${syncKey}`;
+      
+      if (!(await kv.get(kvKey))) {
+        await kv.put(kvKey, "", { metadata: { lastSyncTime: 0 } });
         return ok(c, { syncKey }, "Sync key created");
       }
     }
-
     return fail(c, "Failed to generate unique key", 500);
-  },
+  }
 );
 
-/* ===============================
- * GET /sync/keys  列出所有 SyncKey
- * =============================== */
 syncRoutes.get("/keys", authMiddleware, async (c) => {
   const kv = c.env.oh_file_url;
   const keys: Array<{ key: string; lastSyncTime: number }> = [];
-
   let cursor: string | undefined;
+
   do {
     const result = await kv.list({ prefix: SYNC_KEY_PREFIX, cursor });
     for (const key of result.keys) {
-      const metadata = key.metadata as SyncKeyMetadata | undefined;
       keys.push({
         key: key.name.replace(SYNC_KEY_PREFIX, ""),
-        lastSyncTime: metadata?.lastSyncTime ?? 0,
+        lastSyncTime: (key.metadata as SyncKeyMetadata)?.lastSyncTime ?? 0,
       });
     }
     cursor = result.list_complete ? undefined : result.cursor;
@@ -384,20 +202,12 @@ syncRoutes.get("/keys", authMiddleware, async (c) => {
   return ok(c, { keys });
 });
 
-/* ===============================
- * DELETE /sync/keys/:key  删除 SyncKey
- * =============================== */
 syncRoutes.delete("/keys/:key", authMiddleware, async (c) => {
   const syncKey = c.req.param("key");
-  if (!syncKey) {
-    return fail(c, "Key is required", 400);
-  }
-
+  const kvKey = `${SYNC_KEY_PREFIX}${syncKey}`;
   const kv = c.env.oh_file_url;
-  const kvKey = getSyncKey(syncKey);
 
-  const exists = await kv.get(kvKey);
-  if (!exists && exists !== "") {
+  if (await kv.get(kvKey) === null) {
     return fail(c, "Sync key not found", 404);
   }
 
