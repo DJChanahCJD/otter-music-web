@@ -140,7 +140,7 @@ describe("Sync API", function () {
       assert.equal(response.status, 200);
       const result = await response.json();
       assert.ok(result.success);
-      assert.equal(result.data.data, null);
+      assert.deepEqual(result.data.data, { favorites: [], playlists: [] });
     });
 
     it("should fail with invalid key", async function () {
@@ -189,7 +189,7 @@ describe("Sync API", function () {
 
       assert.equal(response.status, 200);
       const result = await response.json();
-      assert.deepEqual(result.data.data, { test: "hello" });
+      assert.deepEqual(result.data.data, { favorites: [], playlists: [], test: "hello" });
     });
 
     it("should push data with valid lastSyncTime", async function () {
@@ -212,6 +212,357 @@ describe("Sync API", function () {
       const pushResult = await pushResponse.json();
       assert.ok(pushResult.success);
       assert.ok(pushResult.data.lastSyncTime > currentSyncTime);
+    });
+  });
+
+  describe("POST /sync (LWW + Tombstone)", function () {
+    let lwwKey;
+
+    before(async function () {
+      const response = await fetchApi(`/sync/create-key`, {
+        method: "POST",
+        cookie: adminCookie,
+        json: { prefix: "lww" },
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.ok(result.success);
+      lwwKey = result.data.syncKey;
+    });
+
+    after(async function () {
+      if (!lwwKey) return;
+      const response = await fetchApi(`/sync/keys/${lwwKey}`, {
+        method: "DELETE",
+        cookie: adminCookie,
+      });
+      assert.equal(response.status, 200);
+    });
+
+    it("should keep tombstone when stale live record arrives", async function () {
+      if (!lwwKey) this.skip();
+      const baseTs = Date.now();
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [{
+              id: "fav_tomb_1",
+              name: "n",
+              artist: [],
+              album: "",
+              pic_id: "",
+              url_id: "",
+              lyric_id: "",
+              source: "netease",
+              update_time: baseTs,
+              is_deleted: false,
+            }],
+            playlists: [],
+          },
+        },
+      });
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [{
+              id: "fav_tomb_1",
+              name: "n",
+              artist: [],
+              album: "",
+              pic_id: "",
+              url_id: "",
+              lyric_id: "",
+              source: "netease",
+              update_time: baseTs + 5000,
+              is_deleted: true,
+            }],
+            playlists: [],
+          },
+        },
+      });
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [{
+              id: "fav_tomb_1",
+              name: "n2",
+              artist: [],
+              album: "",
+              pic_id: "",
+              url_id: "",
+              lyric_id: "",
+              source: "netease",
+              update_time: baseTs + 3000,
+              is_deleted: false,
+            }],
+            playlists: [],
+          },
+        },
+      });
+
+      const pullResponse = await fetchApi(`/sync`, { bearer: lwwKey, cookie: adminCookie });
+      const pullResult = await pullResponse.json();
+      const item = pullResult.data.data.favorites.find((it) => it.id === "fav_tomb_1");
+      assert.ok(item);
+      assert.equal(item.is_deleted, true);
+      assert.equal(item.update_time, baseTs + 5000);
+    });
+
+    it("should keep newer update_time on concurrent edits", async function () {
+      if (!lwwKey) this.skip();
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [{
+              id: "fav_lww_1",
+              name: "newer",
+              artist: [],
+              album: "",
+              pic_id: "",
+              url_id: "",
+              lyric_id: "",
+              source: "netease",
+              update_time: 3000,
+              is_deleted: false,
+            }],
+            playlists: [],
+          },
+        },
+      });
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [{
+              id: "fav_lww_1",
+              name: "older",
+              artist: [],
+              album: "",
+              pic_id: "",
+              url_id: "",
+              lyric_id: "",
+              source: "netease",
+              update_time: 2500,
+              is_deleted: false,
+            }],
+            playlists: [],
+          },
+        },
+      });
+
+      const pullResponse = await fetchApi(`/sync`, { bearer: lwwKey, cookie: adminCookie });
+      const pullResult = await pullResponse.json();
+      const item = pullResult.data.data.favorites.find((it) => it.id === "fav_lww_1");
+      assert.ok(item);
+      assert.equal(item.name, "newer");
+      assert.equal(item.update_time, 3000);
+    });
+
+    it("should gc tombstones older than 30 days and keep recent tombstones", async function () {
+      if (!lwwKey) this.skip();
+
+      const now = Date.now();
+      const oldTs = now - 31 * 24 * 60 * 60 * 1000;
+      const recentTs = now - 7 * 24 * 60 * 60 * 1000;
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [
+              {
+                id: "fav_gc_old",
+                name: "old",
+                artist: [],
+                album: "",
+                pic_id: "",
+                url_id: "",
+                lyric_id: "",
+                source: "netease",
+                update_time: oldTs,
+                is_deleted: true,
+              },
+              {
+                id: "fav_gc_keep",
+                name: "keep",
+                artist: [],
+                album: "",
+                pic_id: "",
+                url_id: "",
+                lyric_id: "",
+                source: "netease",
+                update_time: recentTs,
+                is_deleted: true,
+              },
+            ],
+            playlists: [
+              {
+                id: "pl_gc_1",
+                name: "gc",
+                createdAt: now,
+                update_time: now,
+                is_deleted: false,
+                tracks: [
+                  {
+                    id: "pl_track_old",
+                    name: "old",
+                    artist: [],
+                    album: "",
+                    pic_id: "",
+                    url_id: "",
+                    lyric_id: "",
+                    source: "netease",
+                    update_time: oldTs,
+                    is_deleted: true,
+                  },
+                  {
+                    id: "pl_track_keep",
+                    name: "keep",
+                    artist: [],
+                    album: "",
+                    pic_id: "",
+                    url_id: "",
+                    lyric_id: "",
+                    source: "netease",
+                    update_time: recentTs,
+                    is_deleted: true,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      });
+
+      const pullResponse = await fetchApi(`/sync`, { bearer: lwwKey, cookie: adminCookie });
+      const pullResult = await pullResponse.json();
+      const favorites = pullResult.data.data.favorites;
+      assert.equal(favorites.some((it) => it.id === "fav_gc_old"), false);
+      assert.equal(favorites.some((it) => it.id === "fav_gc_keep"), true);
+
+      const playlist = pullResult.data.data.playlists.find((it) => it.id === "pl_gc_1");
+      assert.ok(playlist);
+      assert.equal(playlist.tracks.some((it) => it.id === "pl_track_old"), false);
+      assert.equal(playlist.tracks.some((it) => it.id === "pl_track_keep"), true);
+    });
+
+    it("should backfill missing fields for legacy payload", async function () {
+      if (!lwwKey) this.skip();
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: {
+          data: {
+            favorites: [{
+              id: "legacy_fav_1",
+              name: "legacy",
+              artist: [],
+              album: "",
+              pic_id: "",
+              url_id: "",
+              lyric_id: "",
+              source: "netease",
+            }],
+            playlists: [{
+              id: "legacy_pl_1",
+              name: "legacy",
+              createdAt: 1,
+              tracks: [{
+                id: "legacy_track_1",
+                name: "legacy",
+                artist: [],
+                album: "",
+                pic_id: "",
+                url_id: "",
+                lyric_id: "",
+                source: "netease",
+              }],
+            }],
+          },
+        },
+      });
+
+      const pullResponse = await fetchApi(`/sync`, { bearer: lwwKey, cookie: adminCookie });
+      const pullResult = await pullResponse.json();
+
+      const favorite = pullResult.data.data.favorites.find((it) => it.id === "legacy_fav_1");
+      assert.ok(favorite);
+      assert.equal(favorite.update_time, 0);
+      assert.equal(favorite.is_deleted, false);
+
+      const playlist = pullResult.data.data.playlists.find((it) => it.id === "legacy_pl_1");
+      assert.ok(playlist);
+      assert.equal(playlist.update_time, 0);
+      assert.equal(playlist.is_deleted, false);
+
+      const track = playlist.tracks.find((it) => it.id === "legacy_track_1");
+      assert.ok(track);
+      assert.equal(track.update_time, 0);
+      assert.equal(track.is_deleted, false);
+    });
+
+    it("should stay stable on repeated same payload", async function () {
+      if (!lwwKey) this.skip();
+
+      const payload = {
+        favorites: [{
+          id: "idem_fav_1",
+          name: "idem",
+          artist: [],
+          album: "",
+          pic_id: "",
+          url_id: "",
+          lyric_id: "",
+          source: "netease",
+          update_time: 9999,
+          is_deleted: false,
+        }],
+        playlists: [],
+      };
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: { data: payload },
+      });
+
+      await fetchApi(`/sync`, {
+        method: "POST",
+        bearer: lwwKey,
+        cookie: adminCookie,
+        json: { data: payload },
+      });
+
+      const pullResponse = await fetchApi(`/sync`, { bearer: lwwKey, cookie: adminCookie });
+      const pullResult = await pullResponse.json();
+      const matched = pullResult.data.data.favorites.filter((it) => it.id === "idem_fav_1");
+      assert.equal(matched.length, 1);
+      assert.equal(matched[0].update_time, 9999);
+      assert.equal(matched[0].is_deleted, false);
     });
   });
 

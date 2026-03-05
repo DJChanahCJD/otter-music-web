@@ -56,6 +56,181 @@ const prefixSchema = z
   .max(20)
   .regex(/^[a-z0-9_-]+$/i);
 
+const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+type SyncRecord = {
+  id: string;
+  update_time: number;
+  is_deleted: boolean;
+} & Record<string, any>;
+
+type SyncPlaylist = SyncRecord & {
+  tracks: SyncRecord[];
+};
+
+function normalizeUpdateTime(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return value;
+}
+
+function normalizeIsDeleted(value: unknown): boolean {
+  return typeof value === "boolean" ? value : false;
+}
+
+function toObject(value: unknown): Record<string, any> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, any>;
+}
+
+function sanitizeRecord(value: unknown): SyncRecord | null {
+  const raw = toObject(value);
+  if (typeof raw.id !== "string" || !raw.id.trim()) return null;
+  return {
+    ...raw,
+    update_time: normalizeUpdateTime(raw.update_time),
+    is_deleted: normalizeIsDeleted(raw.is_deleted),
+  };
+}
+
+function sanitizeRecordList(value: unknown): SyncRecord[] {
+  if (!Array.isArray(value)) return [];
+  const records: SyncRecord[] = [];
+  for (const item of value) {
+    const record = sanitizeRecord(item);
+    if (record) records.push(record);
+  }
+  return records;
+}
+
+function sanitizePlaylist(value: unknown): SyncPlaylist | null {
+  const playlist = sanitizeRecord(value);
+  if (!playlist) return null;
+  return {
+    ...playlist,
+    tracks: sanitizeRecordList((playlist as Record<string, any>).tracks),
+  };
+}
+
+function sanitizePlaylistList(value: unknown): SyncPlaylist[] {
+  if (!Array.isArray(value)) return [];
+  const playlists: SyncPlaylist[] = [];
+  for (const item of value) {
+    const playlist = sanitizePlaylist(item);
+    if (playlist) playlists.push(playlist);
+  }
+  return playlists;
+}
+
+function sanitizeSyncData(value: unknown): Record<string, any> & {
+  favorites: SyncRecord[];
+  playlists: SyncPlaylist[];
+} {
+  const data = toObject(value);
+  return {
+    ...data,
+    favorites: sanitizeRecordList(data.favorites),
+    playlists: sanitizePlaylistList(data.playlists),
+  };
+}
+
+function shouldGcRecord(record: SyncRecord, now: number): boolean {
+  return record.is_deleted && now - record.update_time > TOMBSTONE_TTL_MS;
+}
+
+function gcSyncData(data: ReturnType<typeof sanitizeSyncData>, now: number) {
+  const favorites = data.favorites.filter((item) => !shouldGcRecord(item, now));
+  const playlists: SyncPlaylist[] = [];
+
+  for (const playlist of data.playlists) {
+    if (shouldGcRecord(playlist, now)) continue;
+    playlists.push({
+      ...playlist,
+      tracks: playlist.tracks.filter((track) => !shouldGcRecord(track, now)),
+    });
+  }
+
+  return {
+    ...data,
+    favorites,
+    playlists,
+  };
+}
+
+function parseStoredData(raw: string | null): unknown {
+  if (raw === null || raw === "") return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function selectLwwRecord(serverRecord: SyncRecord, clientRecord: SyncRecord): SyncRecord {
+  if (clientRecord.update_time > serverRecord.update_time) return clientRecord;
+  return serverRecord;
+}
+
+function mergeRecordList(serverRecords: SyncRecord[], clientRecords: SyncRecord[]): SyncRecord[] {
+  const mergedMap = new Map<string, SyncRecord>();
+  const order: string[] = [];
+
+  for (const record of serverRecords) {
+    mergedMap.set(record.id, record);
+    order.push(record.id);
+  }
+
+  for (const record of clientRecords) {
+    const existing = mergedMap.get(record.id);
+    if (!existing) {
+      mergedMap.set(record.id, record);
+      order.push(record.id);
+      continue;
+    }
+    mergedMap.set(record.id, selectLwwRecord(existing, record));
+  }
+
+  return order.map((id) => mergedMap.get(id)!);
+}
+
+function mergePlaylistList(serverPlaylists: SyncPlaylist[], clientPlaylists: SyncPlaylist[]): SyncPlaylist[] {
+  const mergedMap = new Map<string, SyncPlaylist>();
+  const order: string[] = [];
+
+  for (const playlist of serverPlaylists) {
+    mergedMap.set(playlist.id, playlist);
+    order.push(playlist.id);
+  }
+
+  for (const playlist of clientPlaylists) {
+    const existing = mergedMap.get(playlist.id);
+    if (!existing) {
+      mergedMap.set(playlist.id, playlist);
+      order.push(playlist.id);
+      continue;
+    }
+    const mergedTracks = mergeRecordList(existing.tracks, playlist.tracks);
+    const winner = selectLwwRecord(existing, playlist) as SyncPlaylist;
+    mergedMap.set(playlist.id, {
+      ...winner,
+      tracks: mergedTracks,
+    });
+  }
+
+  return order.map((id) => mergedMap.get(id)!);
+}
+
+function mergeSyncData(
+  serverData: ReturnType<typeof sanitizeSyncData>,
+  clientData: ReturnType<typeof sanitizeSyncData>,
+) {
+  return {
+    ...serverData,
+    ...clientData,
+    favorites: mergeRecordList(serverData.favorites, clientData.favorites),
+    playlists: mergePlaylistList(serverData.playlists, clientData.playlists),
+  };
+}
+
 /* ===============================
  * GET /sync/check  检查同步状态
  * =============================== */
@@ -93,23 +268,26 @@ syncRoutes.get("/", async (c) => {
     return fail(c, "Sync key not found", 404);
   }
 
-  let data: any = null;
-  try {
-    data = value ? JSON.parse(value) : null;
-  } catch {
-    // 防止历史损坏数据导致服务崩溃
-    data = null;
+  const serverTime = metadata?.lastSyncTime ?? 0;
+  const now = Date.now();
+  const sanitizedData = sanitizeSyncData(parseStoredData(value));
+  const gcData = gcSyncData(sanitizedData, now);
+
+  if (JSON.stringify(gcData) !== JSON.stringify(sanitizedData)) {
+    await kv.put(kvKey, JSON.stringify(gcData), {
+      metadata: { lastSyncTime: serverTime } satisfies SyncKeyMetadata,
+    });
   }
 
   return ok(c, {
-    data,
-    lastSyncTime: metadata?.lastSyncTime ?? 0,
+    data: gcData,
+    lastSyncTime: serverTime,
   });
 });
 
 /* ===============================
  * POST /sync  推送数据
- * 乐观锁避免覆盖
+ * 记录级 LWW 合并
  * =============================== */
 syncRoutes.post(
   "/",
@@ -135,17 +313,14 @@ syncRoutes.post(
       return fail(c, "Sync key not found", 404);
     }
 
-    const serverTime = existing.metadata?.lastSyncTime ?? 0;
-    const clientTime = body.lastSyncTime ?? 0;
-
-    /** 乐观锁：客户端比服务器旧 → 拒绝 */
-    if (clientTime < serverTime) {
-      return fail(c, "Conflict: data outdated", 409);
-    }
+    const now = Date.now();
+    const serverData = gcSyncData(sanitizeSyncData(parseStoredData(existing.value)), now);
+    const clientData = gcSyncData(sanitizeSyncData(body.data), now);
+    const mergedData = mergeSyncData(serverData, clientData);
 
     const newTime = Date.now();
 
-    await kv.put(kvKey, JSON.stringify(body.data), {
+    await kv.put(kvKey, JSON.stringify(mergedData), {
       metadata: { lastSyncTime: newTime } satisfies SyncKeyMetadata,
     });
 
