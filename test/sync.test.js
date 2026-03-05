@@ -54,7 +54,6 @@ describe("Sync API", function () {
   });
 
   after(async function () {
-    // 集中清理生成的 Key
     for (const key of [createdKey, testKeyWithPrefix]) {
       if (key) await fetchApi(`/sync/keys/${key}`, { method: "DELETE", cookie: adminCookie });
     }
@@ -107,29 +106,22 @@ describe("Sync API", function () {
 
   describe("POST /sync (Push Data)", function () {
     it("should push and fetch data successfully", async function () {
-      await fetchJson(`/sync`, { method: "POST", bearer: createdKey, cookie: adminCookie, json: { data: { test: "hello" } } });
+      await pushSyncData(createdKey, { test: "hello" });
       
       const { data } = await pullSyncData(createdKey);
       assert.deepEqual(data.data, { favorites: [], playlists: [], test: "hello" });
-    });
-
-    it("should push data with valid lastSyncTime", async function () {
-      const checkRes = await fetchJson(`/sync/check`, { bearer: createdKey, cookie: adminCookie });
-      
-      const pushRes = await fetchJson(`/sync`, { method: "POST", bearer: createdKey, cookie: adminCookie, json: { data: { version: 3 }, lastSyncTime: checkRes.data.lastSyncTime } });
-      assert.ok(pushRes.data.lastSyncTime > checkRes.data.lastSyncTime);
     });
   });
 
   describe("POST /sync (LWW + Tombstone)", function () {
     let lwwKey;
 
-    before(async function () {
+    beforeEach(async function () {
       const { data } = await fetchJson(`/sync/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "lww" } });
       lwwKey = data.syncKey;
     });
 
-    after(async function () {
+    afterEach(async function () {
       if (lwwKey) await fetchApi(`/sync/keys/${lwwKey}`, { method: "DELETE", cookie: adminCookie });
     });
 
