@@ -23,7 +23,7 @@ const generateKey = (prefix?: string) => {
   return prefix ? `${prefix}_${code}` : code;
 };
 
-const sanitizeRecord = (v: any): SyncRecord | null => 
+const sanitizeRecord = (v: any): SyncRecord | null =>
   (v?.id && typeof v.id === "string" ? { ...v, update_time: Number.isFinite(v.update_time) ? v.update_time : 0, is_deleted: Boolean(v.is_deleted) } : null);
 
 const sanitizeList = <T>(v: any): T[] => (Array.isArray(v) ? (v.map(sanitizeRecord).filter(Boolean) as unknown as T[]) : []);
@@ -92,7 +92,7 @@ syncRoutes.get("/", async (c) => {
   const serverTime = metadata?.lastSyncTime ?? 0;
   // GET 接口仅作返回，不执行写入操作，减少 KV 开销
   const cleanedData = gcSyncData(sanitizeSyncData(value ? JSON.parse(value) : {}), Date.now());
-  
+
   return ok(c, { data: cleanedData, lastSyncTime: serverTime });
 });
 
@@ -111,15 +111,16 @@ syncRoutes.post(
     const serverData = gcSyncData(sanitizeSyncData(existing ? JSON.parse(existing) : {}), now);
     const clientData = gcSyncData(sanitizeSyncData(clientRaw), now);
 
-    // 彻底信赖 LWW 合并机制，不报 409 冲突
     const mergedData = {
       ...serverData,
       ...clientData,
       favorites: mergeLWW(serverData.favorites, clientData.favorites),
-      playlists: mergeLWW(serverData.playlists, clientData.playlists, (s, c) => ({
-        ...c, 
-        tracks: mergeLWW(s.tracks, c.tracks) 
-      })),
+
+      playlists: mergeLWW(serverData.playlists, clientData.playlists, (s, c) => {
+        // 谁的歌单整体 update_time 新，就完全听谁的
+        // 属性和歌曲列表（tracks）都作为整体跟随胜者
+        return c.update_time >= s.update_time ? c : s;
+      }),
     };
 
     const newVersion = Date.now();
