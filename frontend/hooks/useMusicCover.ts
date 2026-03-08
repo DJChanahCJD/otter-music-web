@@ -19,7 +19,7 @@ export function useMusicCover(
 
     const fetchCover = async () => {
       try {
-        const url = await musicApi.getPic(track.pic_id!, track.source);
+        const url = await musicApi.getPic(track);
         if (active) {
           setCoverUrl(url);
         }
@@ -34,7 +34,7 @@ export function useMusicCover(
     return () => {
       active = false;
     };
-  }, [track?.pic_id, track?.source, enabled]);
+  }, [track, enabled]);
 
   return coverUrl;
 }

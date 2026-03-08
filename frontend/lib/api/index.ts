@@ -113,14 +113,17 @@ export const musicApi = {
 
   /* ---------------- URL ---------------- */
 
-  async getUrl(id: string, source: MusicSource, br = 192): Promise<string | null> {
-    const key = `url:${source}:${id}:${br}`;
+
+  async getUrl(track: MusicTrack, br = 192): Promise<string | null> {
+    if (track.source === 'podcast') return track.url_id;
+
+    const key = `url:${track.source}:${track.id}:${br}`;
 
     const res = await clientSWRFetch<{ url: string }>(
       key,
       async () => {
         const json = await requestJSON<{ url?: string }>(
-          buildUrl({ types: 'url', id, br }, source)
+          buildUrl({ types: 'url', id: track.id, br }, track.source)
         );
         return json?.url ? { url: json.url } : null;
       },
@@ -132,14 +135,16 @@ export const musicApi = {
 
   /* ---------------- 封面 ---------------- */
 
-  async getPic(id: string, source: MusicSource, size: number = 800): Promise<string | null> {
-    const key = `pic:${source}:${id}`;
+  async getPic(track: MusicTrack, size: number = 800): Promise<string | null> {
+    if (track.source === 'podcast') return track.pic_id; // 播客源直接返回 URL (id 即为 coverUrl)
+
+    const key = `pic:${track.source}:${track.id}`;
 
     const res = await clientSWRFetch<{ url: string }>(
       key,
       async () => {
         const json = await requestJSON<{ url?: string }>(
-          buildUrl({ types: 'pic', id, size }, source)
+          buildUrl({ types: 'pic', id: track.id, size }, track.source)
         );
         return json?.url ? { url: json.url } : null;
       },
@@ -152,6 +157,9 @@ export const musicApi = {
   /* ---------------- 歌词 ---------------- */
 
   async getLyric(id: string, source: MusicSource): Promise<SongLyric | null> {
+    if (source === 'podcast') return null; // 播客源暂无歌词
+    if (!id) return null;
+
     const key = `lyric:${source}:${id}`;
 
     return clientSWRFetch<SongLyric>(

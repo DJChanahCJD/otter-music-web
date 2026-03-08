@@ -10,6 +10,7 @@ import {
   ListVideo,
   Cloud,
   RefreshCw,
+  Podcast,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -27,10 +28,10 @@ import { useShallow } from "zustand/react/shallow";
 import { SyncConfig } from "./SyncConfig";
 
 interface MusicSidebarProps {
-  currentView: "search" | "favorites" | "playlist" | "queue" | "netease";
+  currentView: "search" | "favorites" | "playlist" | "queue" | "netease" | "podcast";
   currentPlaylistId?: string;
   onViewChange: (
-    view: "search" | "favorites" | "playlist" | "queue" | "netease",
+    view: "search" | "favorites" | "playlist" | "queue" | "netease" | "podcast",
     playlistId?: string,
   ) => void;
   onItemClick?: () => void;
@@ -138,6 +139,13 @@ export const MusicSidebar = memo(function MusicSidebar({
             icon={Cloud}
             label="网易云音乐"
             onClick={() => onViewChange("netease")}
+            onItemClick={onItemClick}
+          />
+          <NavItem
+            active={currentView === "podcast"}
+            icon={Podcast}
+            label="播客"
+            onClick={() => onViewChange("podcast")}
             onItemClick={onItemClick}
           />
         </div>

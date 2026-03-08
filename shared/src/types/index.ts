@@ -1,6 +1,7 @@
 // shared/src/types/index.ts
 export * from "./music";
 export * from "./sync";
+export * from "./podcast";
 
 // 统一API响应类型
 export type ApiResponse<T = any> = {

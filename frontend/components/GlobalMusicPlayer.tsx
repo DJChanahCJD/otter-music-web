@@ -110,7 +110,7 @@ export function GlobalMusicPlayer() {
         
         // 1. Get URL
         const url = await retry(
-          () => musicApi.getUrl(currentTrack.id, currentTrack.source, parseInt(quality, 10)),
+          () => musicApi.getUrl(currentTrack, parseInt(quality, 10)),
           2,
           600
         );

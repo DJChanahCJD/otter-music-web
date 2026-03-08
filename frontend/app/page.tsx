@@ -8,6 +8,7 @@ import { MusicPlaylistView } from '@/components/MusicPlaylistView';
 import { MusicSearchView } from '@/components/MusicSearchView';
 import { MusicSidebar } from '@/components/MusicSidebar';
 import { NetEaseView } from '@/components/external/NetEaseView';
+import { PodcastDemoView } from '@/components/podcast/PodcastDemoView';
 import { MusicTrack } from '@shared/types';
 import { format } from 'date-fns';
 
@@ -30,7 +31,7 @@ export default function MusicPage() {
     setCurrentIndex
   } = useMusicStore();
 
-  const [currentView, setCurrentView] = useState<"search" | "favorites" | "playlist" | "queue" | "netease">("search");
+  const [currentView, setCurrentView] = useState<"search" | "favorites" | "playlist" | "queue" | "netease" | "podcast">("search");
   const [activePlaylistId, setActivePlaylistId] = useState<string>();
 
   const currentTrack = queue[currentIndex];
@@ -87,6 +88,10 @@ export default function MusicPage() {
 
       {currentView === 'netease' && (
         <NetEaseView />
+      )}
+
+      {currentView === 'podcast' && (
+        <PodcastDemoView />
       )}
 
       {currentView === 'favorites' && (
