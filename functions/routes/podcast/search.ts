@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../types/hono';
-import { SearchPodcastItem } from '@shared/types';
+import { searchPodcasts } from '../../lib/podcast/index';
 
 export const searchRoutes = new Hono<{
   Bindings: Env;
@@ -12,72 +12,9 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional().default(20),
   country: z.string().trim().length(2).optional().default('CN'),
   lang: z.string().trim().optional().default('zh_cn'),
+  // 支持多源搜索，以逗号分隔，如 "apple,xyz"
+  source: z.string().trim().optional().default('apple'),
 });
-
-type ApplePodcastResult = {
-  collectionId?: number;
-  collectionName?: string;
-  artistName?: string;
-  feedUrl?: string;
-  artworkUrl600?: string;
-  artworkUrl100?: string;
-  collectionViewUrl?: string;
-  genres?: string[];
-};
-
-
-function normalizeAppleResult(item: ApplePodcastResult): SearchPodcastItem {
-  return {
-    source: 'apple',
-    id: String(item.collectionId ?? ''),
-    title: item.collectionName?.trim() ?? '',
-    author: item.artistName?.trim() ?? '',
-    cover: item.artworkUrl600?.trim() || item.artworkUrl100?.trim() || null,
-    rssUrl: item.feedUrl?.trim() || null,
-    url: item.collectionViewUrl?.trim() || null,
-    // intro: '',
-    // genres: item.genres ?? [],
-  };
-}
-
-async function searchApplePodcasts(params: {
-  q: string;
-  limit: number;
-  country: string;
-  lang: string;
-}): Promise<SearchPodcastItem[]> {
-  const url = new URL('https://itunes.apple.com/search');
-  url.searchParams.set('term', params.q);
-  url.searchParams.set('media', 'podcast');
-  url.searchParams.set('entity', 'podcast');
-  url.searchParams.set('limit', String(params.limit));
-  url.searchParams.set('country', params.country.toUpperCase() || 'CN');
-  url.searchParams.set('lang', params.lang.toLowerCase() || 'zh_cn');
-
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'OtterMusic/2.0',
-    },
-    cf: {
-      cacheTtl: 60 * 60,
-      cacheEverything: true,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Apple search failed: HTTP ${response.status}`);
-  }
-
-  const json = (await response.json()) as {
-    results?: ApplePodcastResult[];
-  };
-
-  return (json.results ?? [])
-    .map(normalizeAppleResult)
-    .filter((item) => item.id && item.title);
-}
 
 searchRoutes.get('/', async (c) => {
   const parsed = querySchema.safeParse(c.req.query());
@@ -92,14 +29,17 @@ searchRoutes.get('/', async (c) => {
     );
   }
 
-  const { q, limit, country, lang } = parsed.data;
+  const { q, limit, country, lang, source } = parsed.data;
 
+  // 解析 source 参数
+  const sources = source.split(',').map((s) => s.trim()).filter(Boolean);
   try {
-    const data = await searchApplePodcasts({
+    const data = await searchPodcasts({
       q,
       limit,
       country,
       lang,
+      sources,
     });
 
     return c.json({
@@ -107,6 +47,7 @@ searchRoutes.get('/', async (c) => {
       data,
     });
   } catch (error) {
+    console.error('Search route error:', error);
     return c.json(
       {
         success: false,

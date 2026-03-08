@@ -24,7 +24,7 @@ export interface PodcastFeed {
 }
 
 export interface SearchPodcastItem {
-  source: "apple";
+  source: "apple" | "xyz" | "xmly";
   id: string;
   title: string;
   author: string;
