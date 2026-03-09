@@ -26,6 +26,13 @@ export const ALLOWED_RESPONSE_HEADERS = [
   "content-range",
   "expires",
   "pragma",
+  "access-control-allow-origin",
+  "access-control-allow-headers",
+  "access-control-allow-methods",
+  "access-control-expose-headers",
+  "access-control-allow-credentials",
+  "access-control-max-age",
+  "vary",
 ];
 
 /**
