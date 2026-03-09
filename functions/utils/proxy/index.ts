@@ -46,10 +46,3 @@ export function handleStreamResponse(response: Response): Response {
 export function getProxyUrl(origin: string, targetUrl: string) {
   return `${origin}/proxy?url=${encodeURIComponent(targetUrl)}`;
 }
-
-/**
- * 获取壁纸专用的代理 URL
- */
-export function getWallpaperProxyUrl(origin: string, targetUrl: string) {
-  return `${origin}/wallpaper/proxy?url=${encodeURIComponent(targetUrl)}`;
-}

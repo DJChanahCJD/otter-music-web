@@ -15,14 +15,21 @@ const proxySchema = z.object({
 
 const handleProxyRequest = async (c: any) => {
   const { url: targetUrl, headers: headersParam, filename } = c.req.valid('query');
-  let customHeaders: Record<string, string> | undefined;
+  let customHeaders: Record<string, string> = {};
 
   if (headersParam) {
     try {
-      customHeaders = JSON.parse(headersParam);
+      const parsed = JSON.parse(headersParam);
+      customHeaders = { ...customHeaders, ...parsed };
     } catch {
       // Ignore invalid headers
     }
+  }
+
+  // Forward Range header for audio seeking support
+  const range = c.req.header('range');
+  if (range) {
+    customHeaders['range'] = range;
   }
 
   try {
