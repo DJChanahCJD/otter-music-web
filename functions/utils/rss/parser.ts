@@ -2,7 +2,7 @@ import sax from 'sax';
 import { RssFeedData, RssEpisode } from './types';
 import { normalizeUrl, stripHtml } from './utils';
 
-const MAX_EPISODES = 50; // 极简限制：最多提取50条
+const MAX_EPISODES = 30; // 极简限制：最多提取30条
 
 // 核心：SAX 流式解析器
 export async function streamParseRss(stream: ReadableStream<Uint8Array>, feedUrl: string): Promise<RssFeedData> {
