@@ -357,3 +357,32 @@ export function resolveUrl(url: string): ResolveUrlResult | null {
     
     return result;
 }
+
+export const toggleSubArtist = async (id: string, shouldSub: boolean, cookie: string = '') => { 
+    const realId = id.replace(/^(neartist_|ne_artist_)/, ''); 
+    const action = shouldSub ? 'sub' : 'unsub'; 
+    return requestWeapi<{ code: number, message?: string }>( 
+        `${BASE_URL}/weapi/artist/${action}`, 
+        { artistId: realId, artistIds: [realId] }, // !  TODO:当前收藏歌手会报 250 系统错误, 暂时无法使用 
+        cookie 
+    ); 
+}; 
+
+export const toggleSubAlbum = async (id: string, shouldSub: boolean, cookie: string = '') => { 
+    const realId = id.replace(/^(nealbum_|ne_album_)/, ''); 
+    const action = shouldSub ? 'sub' : 'unsub'; 
+    return requestWeapi<{ code: number, message?: string }>( 
+        `${BASE_URL}/weapi/album/${action}`, 
+        { id: realId, t: shouldSub ? 1 : 0 }, 
+        cookie 
+    ); 
+}; 
+
+export const toggleSubPlaylist = async (id: string, shouldSub: boolean, cookie: string = '') => { 
+    const realId = id.replace(/^(neplaylist_|ne_playlist_)/, ''); 
+    return requestWeapi<{ code: number, message?: string }>( 
+        `${BASE_URL}/weapi/playlist/subscribe`, 
+        { id: realId, t: shouldSub ? 1 : 2 }, 
+        cookie 
+    ); 
+};

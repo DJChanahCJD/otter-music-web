@@ -13,6 +13,9 @@ import {
   getArtist,
   getPlaylists,
   resolveUrl,
+  toggleSubArtist,
+  toggleSubAlbum,
+  toggleSubPlaylist,
 } from '../../utils/music/netease-api';
 import type {
     QrKeyResponse,
@@ -264,6 +267,63 @@ neteaseRoutes.post('/search', async (c) => {
 
     const hasMore = currentPage * currentLimit < songCount;
     return c.json({ items, hasMore });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 收藏/取消收藏歌手
+ * @method POST
+ * @path /artist/sub
+ * @body {string} id - Artist ID
+ * @body {boolean} shouldSub - true to subscribe, false to unsubscribe
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ code: number, message?: string }>}
+ */
+neteaseRoutes.post('/artist/sub', async (c) => {
+  const { id, shouldSub, cookie } = await c.req.json<{ id: string, shouldSub: boolean, cookie: string }>();
+  try {
+    const res = await toggleSubArtist(id, shouldSub, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 收藏/取消收藏专辑
+ * @method POST
+ * @path /album/sub
+ * @body {string} id - Album ID
+ * @body {boolean} shouldSub - true to subscribe, false to unsubscribe
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ code: number, message?: string }>}
+ */
+neteaseRoutes.post('/album/sub', async (c) => {
+  const { id, shouldSub, cookie } = await c.req.json<{ id: string, shouldSub: boolean, cookie: string }>();
+  try {
+    const res = await toggleSubAlbum(id, shouldSub, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+/**
+ * 收藏/取消收藏歌单
+ * @method POST
+ * @path /playlist/sub
+ * @body {string} id - Playlist ID
+ * @body {boolean} shouldSub - true to subscribe, false to unsubscribe
+ * @body {string} cookie - User cookie
+ * @returns {Promise<{ code: number, message?: string }>}
+ */
+neteaseRoutes.post('/playlist/sub', async (c) => {
+  const { id, shouldSub, cookie } = await c.req.json<{ id: string, shouldSub: boolean, cookie: string }>();
+  try {
+    const res = await toggleSubPlaylist(id, shouldSub, cookie);
+    return c.json(res);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
   }
