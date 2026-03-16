@@ -9,7 +9,7 @@ import { SYNC_KEY_PREFIX, SyncKeyMetadata } from "@shared/types";
 type Variables = { syncKey: string; kvKey: string };
 export const syncRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOMBSTONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 7天
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 type SyncRecord = { id: string; update_time: number; is_deleted: boolean } & Record<string, any>;
@@ -38,19 +38,20 @@ const sanitizeSyncData = (v: any) => ({
 function mergeLWW<T extends SyncRecord>(server: T[], client: T[], mergeChildren?: (s: T, c: T) => T): T[] {
   const map = new Map<string, T>(server.map(item => [item.id, item]));
   const order = server.map(item => item.id);
+  const newIds: string[] = [];
 
   for (const c of client) {
     const s = map.get(c.id);
     if (!s) {
       map.set(c.id, c);
-      order.push(c.id);
+      newIds.push(c.id);
     } else {
       const winner = c.update_time >= s.update_time ? c : s;
       const merged = mergeChildren ? mergeChildren(s, c) : winner;
       map.set(c.id, { ...merged, update_time: winner.update_time, is_deleted: winner.is_deleted });
     }
   }
-  return order.map(id => map.get(id)!);
+  return [...newIds, ...order].map(id => map.get(id)!);
 }
 
 function gcSyncData(data: ReturnType<typeof sanitizeSyncData>, now: number) {
