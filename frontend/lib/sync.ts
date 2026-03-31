@@ -29,6 +29,7 @@ const getSnapshot = (): SyncSnapshot => {
 
 const applySnapshot = (data: SyncSnapshot) => {
   useMusicStore.setState({
+    // 直接全量 setState，保留 is_deleted tombstone 供回收站使用
     favorites: data.favorites ?? [],
     playlists: data.playlists ?? [],
   });

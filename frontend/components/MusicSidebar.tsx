@@ -11,6 +11,7 @@ import {
   Cloud,
   RefreshCw,
   Podcast,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -28,10 +29,10 @@ import { useShallow } from "zustand/react/shallow";
 import { SyncConfig } from "./SyncConfig";
 
 interface MusicSidebarProps {
-  currentView: "search" | "favorites" | "playlist" | "queue" | "netease" | "podcast";
+  currentView: "search" | "favorites" | "playlist" | "queue" | "netease" | "podcast" | "trash";
   currentPlaylistId?: string;
   onViewChange: (
-    view: "search" | "favorites" | "playlist" | "queue" | "netease" | "podcast",
+    view: "search" | "favorites" | "playlist" | "queue" | "netease" | "podcast" | "trash",
     playlistId?: string,
   ) => void;
   onItemClick?: () => void;
@@ -76,13 +77,21 @@ export const MusicSidebar = memo(function MusicSidebar({
   onItemClick,
   className,
 }: MusicSidebarProps) {
-  const { playlists, createPlaylist, queue } = useMusicStore(
+  const { playlists, createPlaylist, queue, favorites } = useMusicStore(
     useShallow((state) => ({
       playlists: state.playlists,
       createPlaylist: state.createPlaylist,
       queue: state.queue,
+      favorites: state.favorites,
     })),
   );
+
+  const trashCount =
+    favorites.filter((t) => t.is_deleted).length +
+    playlists.filter((p) => p.is_deleted).length;
+
+  // 只显示未删除的歌单
+  const activePlaylists = playlists.filter((p) => !p.is_deleted);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
@@ -148,6 +157,27 @@ export const MusicSidebar = memo(function MusicSidebar({
             onClick={() => onViewChange("podcast")}
             onItemClick={onItemClick}
           />
+          <div
+            role="button"
+            className={cn(
+              buttonVariants({ variant: "ghost" }),
+              "w-full justify-start gap-2 cursor-pointer group pr-1",
+              currentView === "trash" && "bg-primary/80",
+            )}
+            title="回收站"
+            onClick={() => {
+              onViewChange("trash");
+              onItemClick?.();
+            }}
+          >
+            <Trash2 className="h-4 w-4 shrink-0" />
+            <span className="truncate flex-1 text-left">回收站</span>
+            {trashCount > 0 && (
+              <span className="ml-auto text-[10px] font-medium bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 min-w-[18px] text-center shrink-0">
+                {trashCount}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -203,7 +233,7 @@ export const MusicSidebar = memo(function MusicSidebar({
 
         <ScrollArea className="flex-1">
           <div className="px-2 space-y-1 pb-4">
-            {playlists.map((playlist) => (
+            {activePlaylists.map((playlist) => (
               <NavItem
                 key={playlist.id}
                 active={
@@ -215,7 +245,7 @@ export const MusicSidebar = memo(function MusicSidebar({
                 onClick={() => onViewChange("playlist", playlist.id)}
               />
             ))}
-            {playlists.length === 0 && (
+            {activePlaylists.length === 0 && (
               <div className="px-4 py-8 text-center text-xs text-muted-foreground border-dashed border rounded-md mx-2">
                 暂无歌单
               </div>

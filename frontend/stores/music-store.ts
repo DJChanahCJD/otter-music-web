@@ -49,6 +49,9 @@ interface MusicState {
   addToPlaylist: (playlistId: string, track: MusicTrack) => void;
   removeFromPlaylist: (playlistId: string, trackId: string) => void;
 
+  /** 从回收站恢复（favorites 或 playlist） */
+  restoreFromTrash: (type: "favorite" | "playlist", id: string) => void;
+
   // --- Settings (Persisted) ---
   quality: string;
   searchSource: MusicSource;
@@ -113,38 +116,47 @@ export const useMusicStore = create<MusicState>()(
       playlists: [],
 
       addToFavorites: (track) => set((state) => {
-        if (state.favorites.some(t => t.id === track.id)) return state;
-        return { favorites: [track, ...state.favorites] };
+        const existing = state.favorites.find(t => t.id === track.id);
+        if (existing) {
+          // 若已存在但处于软删除状态，则复活
+          if (existing.is_deleted) {
+            return { favorites: state.favorites.map(t => t.id === track.id ? { ...t, is_deleted: false, update_time: Date.now() } : t) };
+          }
+          return state;
+        }
+        return { favorites: [{ ...track, update_time: Date.now() }, ...state.favorites] };
       }),
       removeFromFavorites: (trackId) => set((state) => ({
-        favorites: state.favorites.filter(t => t.id !== trackId)
+        // 软删除：标记 is_deleted=true
+        favorites: state.favorites.map(t => t.id === trackId ? { ...t, is_deleted: true, update_time: Date.now() } : t)
       })),
-      isFavorite: (trackId) => get().favorites.some(t => t.id === trackId),
+      isFavorite: (trackId) => get().favorites.some(t => t.id === trackId && !t.is_deleted),
 
       createPlaylist: (name) => {
         const id = uuidv4();
         set((state) => ({
           playlists: [
-            { id, name, tracks: [], createdAt: Date.now() },
+            { id, name, tracks: [], createdAt: Date.now(), update_time: Date.now() },
             ...state.playlists
           ]
         }));
         return id;
       },
       deletePlaylist: (id) => set((state) => ({
-        playlists: state.playlists.filter(p => p.id !== id)
+        // 软删除：标记 is_deleted=true
+        playlists: state.playlists.map(p => p.id === id ? { ...p, is_deleted: true, update_time: Date.now() } : p)
       })),
       renamePlaylist: (id, name) => set((state) => ({
         playlists: state.playlists.map(p =>
           p.id === id
-            ? { ...p, name }
+            ? { ...p, name, update_time: Date.now() }
             : p
         )
       })),
       addToPlaylist: (pid, track) => set((state) => ({
         playlists: state.playlists.map(p =>
           p.id === pid
-            ? { ...p, tracks: p.tracks.some(t => t.id === track.id) ? p.tracks : [track, ...p.tracks] }
+            ? { ...p, tracks: p.tracks.some(t => t.id === track.id) ? p.tracks : [{ ...track, update_time: Date.now() }, ...p.tracks] }
             : p
         )
       })),
@@ -155,6 +167,13 @@ export const useMusicStore = create<MusicState>()(
             : p
         )
       })),
+
+      restoreFromTrash: (type, id) => set((state) => {
+        if (type === "favorite") {
+          return { favorites: state.favorites.map(t => t.id === id ? { ...t, is_deleted: false, update_time: Date.now() } : t) };
+        }
+        return { playlists: state.playlists.map(p => p.id === id ? { ...p, is_deleted: false, update_time: Date.now() } : p) };
+      }),
 
       quality: "192",
       searchSource: "all",

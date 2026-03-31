@@ -9,6 +9,7 @@ import { MusicSearchView } from '@/components/MusicSearchView';
 import { MusicSidebar } from '@/components/MusicSidebar';
 import { NetEaseView } from '@/components/external/NetEaseView';
 import { PodcastDemoView } from '@/components/podcast/PodcastDemoView';
+import { TrashView } from '@/components/TrashView';
 import { MusicTrack } from '@shared/types';
 import { format } from 'date-fns';
 
@@ -31,7 +32,7 @@ export default function MusicPage() {
     setCurrentIndex
   } = useMusicStore();
 
-  const [currentView, setCurrentView] = useState<"search" | "favorites" | "playlist" | "queue" | "netease" | "podcast">("search");
+  const [currentView, setCurrentView] = useState<"search" | "favorites" | "playlist" | "queue" | "netease" | "podcast" | "trash">("search");
   const [activePlaylistId, setActivePlaylistId] = useState<string>();
 
   const currentTrack = queue[currentIndex];
@@ -65,7 +66,7 @@ export default function MusicPage() {
     }
 
     const list = currentView === 'favorites' 
-      ? favorites 
+      ? favorites.filter(t => !t.is_deleted)
       : currentView === 'queue'
       ? queue
       : playlists.find(p => p.id === activePlaylistId)?.tracks || [];
@@ -94,10 +95,14 @@ export default function MusicPage() {
         <PodcastDemoView />
       )}
 
+      {currentView === 'trash' && (
+        <TrashView />
+      )}
+
       {currentView === 'favorites' && (
         <MusicPlaylistView 
           title="我的喜欢"
-          tracks={favorites}
+          tracks={favorites.filter(t => !t.is_deleted)}
           onPlay={handlePlayInPlaylist}
           onRemove={(t) => removeFromFavorites(t.id)}
           currentTrackId={currentTrack?.id}

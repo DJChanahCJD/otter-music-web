@@ -32,6 +32,10 @@ export interface MusicTrack {
   url_id: string;
   lyric_id: string;
   source: MusicSource;
+  /** 软删除标记（回收站机制） */
+  is_deleted?: boolean;
+  /** 最后更新时间，用于 LWW 同步合并 */
+  update_time?: number;
 }
 
 export interface Playlist {
@@ -39,6 +43,10 @@ export interface Playlist {
   name: string;
   tracks: MusicTrack[];
   createdAt: number;
+  /** 软删除标记（回收站机制） */
+  is_deleted?: boolean;
+  /** 最后更新时间，用于 LWW 同步合并 */
+  update_time?: number;
 }
 
 // 需要持久化存储的音乐数据结构
