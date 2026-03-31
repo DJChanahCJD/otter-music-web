@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { v4 as uuidv4 } from 'uuid';
 import { StoreKey } from ".";
-import { MusicStoreData, MusicTrack, MusicSource } from "@shared/types";
+import { MusicStoreData, MusicTrack, MusicSource, Playlist } from "@shared/types";
 
 
 /**
@@ -33,13 +33,6 @@ export const buildCloudPayload = (state: MusicStoreData) => ({
   searchSource: state.searchSource,
   updatedAt: Date.now(),
 });
-
-export interface Playlist {
-  id: string;
-  name: string;
-  tracks: MusicTrack[];
-  createdAt: number;
-}
 
 interface MusicState {
   // --- Library (Persisted) ---

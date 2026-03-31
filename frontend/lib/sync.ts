@@ -1,83 +1,95 @@
-import { syncCheck, syncPull, syncPush } from "@/lib/api/sync";
-import { useMusicStore } from "@/stores/music-store";
-import { useSyncStore } from "@/stores/sync-store";
 import { toast } from "sonner";
+import { ApiError } from "@/lib/api/config";
+import { useSyncStore } from "@/stores/sync-store";
+import { useMusicStore } from "@/stores/music-store";
+import { syncCheck, syncPull, syncPushAndPull } from "@/lib/api/sync";
+import { MusicTrack, Playlist } from "@shared/types";
+import { MergedMusicTrack } from "@/lib/types/music";
 
-type SyncData = {
-  favorites: ReturnType<typeof useMusicStore.getState>["favorites"];
-  playlists: ReturnType<typeof useMusicStore.getState>["playlists"];
+/** --- 类型定义 --- */
+type SyncSnapshot = { favorites: MusicTrack[]; playlists: Playlist[] };
+export type SyncResult = { success: boolean; error?: string; skipped?: boolean };
+
+const SYNC_INTERVAL = 60 * 60 * 1000; // 1小时节流
+
+/** 剔除运行时附加字段（variants），确保只上传纯净的 MusicTrack */
+function cleanTrack(track: MusicTrack | MergedMusicTrack): MusicTrack {
+  const { variants: _, ...rest } = track as MergedMusicTrack;
+  return rest;
+}
+
+/** --- 原子快照操作 --- */
+const getSnapshot = (): SyncSnapshot => {
+  const { favorites, playlists } = useMusicStore.getState();
+  return {
+    favorites: favorites.map(cleanTrack),
+    playlists: playlists.map(p => ({ ...p, tracks: p.tracks.map(cleanTrack) })),
+  };
 };
 
-function getSyncData(): SyncData {
-  const state = useMusicStore.getState();
-  return {
-    favorites: state.favorites,
-    playlists: state.playlists,
-  };
-}
-
-function applySyncData(data: SyncData): void {
+const applySnapshot = (data: SyncSnapshot) => {
   useMusicStore.setState({
-    favorites: data.favorites,
-    playlists: data.playlists,
+    favorites: data.favorites ?? [],
+    playlists: data.playlists ?? [],
   });
-}
-
-type SyncResult = { success: boolean; error?: string; skipped?: boolean };
-
-const SYNC_DIFF_MS = 60 * 60 * 1000;
+};
 
 /**
- * 执行同步检查并同步数据
- * - 服务器更新时间 > 本地：拉取并覆盖本地
- * - 服务器更新时间 <= 本地：推送本地数据到服务器
- * - 时间相同且未超过1小时：跳过同步
+ * 数据同步 (V2: 一趟式同步)
+ * - syncCheck 检查版本
+ * - syncPushAndPull 推送本地快照并拉取服务端 LWW 合并结果
+ * - POST 失败时 syncPull 兜底
  */
-export async function checkAndSync(): Promise<SyncResult> {
-  const { syncKey, lastSyncTime: localLastSyncTime } = useSyncStore.getState();
-
-  if (!syncKey) {
-    return { success: false, error: "未配置同步密钥" };
-  }
+export async function checkAndSync(force = false): Promise<SyncResult> {
+  const { syncKey, lastSyncTime, setLastSyncTime, clearSyncConfig } = useSyncStore.getState();
+  if (!syncKey) return { success: false, error: "未配置同步密钥" };
 
   try {
-    const checkResult = await syncCheck(syncKey);
-    const serverLastSyncTime = checkResult.lastSyncTime;
-
-    // 如果服务器和本地时间相同，且距离现在不到60分钟，跳过同步
-    if (serverLastSyncTime === localLastSyncTime && localLastSyncTime > 0) {
-      const timeSinceSync = Date.now() - serverLastSyncTime;
-      if (timeSinceSync < SYNC_DIFF_MS) {
-        return { success: true, skipped: true };
-      }
-    }
-
-    if (serverLastSyncTime > localLastSyncTime) {
-      const pullResult = await syncPull(syncKey);
-      applySyncData(pullResult.data as SyncData);
-      useSyncStore.getState().setLastSyncTime(pullResult.lastSyncTime);
-      toast.success("数据已自动同步");
-      return { success: true };
-    }
-
+    // 1. 获取云端最新版本号
+    let serverTime: number;
     try {
-      const syncData = getSyncData();
-      const pushResult = await syncPush(syncKey, syncData, localLastSyncTime);
-      useSyncStore.getState().setLastSyncTime(pushResult.lastSyncTime);
-      toast.success("数据已自动同步");
-      return { success: true };
-    } catch (pushError) {
-      if (pushError instanceof Error && pushError.message.includes("409")) {
-        const pullResult = await syncPull(syncKey);
-        applySyncData(pullResult.data as SyncData);
-        useSyncStore.getState().setLastSyncTime(pullResult.lastSyncTime);
+      ({ lastSyncTime: serverTime } = await syncCheck(syncKey));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        clearSyncConfig();
+        toast.error("同步密钥不存在或已失效");
+        return { success: false, error: "密钥失效" };
+      }
+      throw err;
+    }
+
+    // 2. 节流：非强制同步，且云端没有新数据，且本地最近刚同步过，则跳过
+    if (!force && serverTime === lastSyncTime && lastSyncTime > 0) {
+      if (Date.now() - serverTime < SYNC_INTERVAL) return { success: true, skipped: true };
+    }
+
+    // 3. 一趟式 Push & Pull（无论云端是否有更新，直接发送本地快照进行 LWW 合并）
+    const response = await syncPushAndPull<SyncSnapshot>(syncKey, getSnapshot());
+
+    // 4. 无条件信任服务端合并后的权威结果
+    if (response.data) {
+      applySnapshot(response.data);
+      setLastSyncTime(response.lastSyncTime);
+    }
+
+    toast.success(serverTime > lastSyncTime ? "已同步云端新数据" : "同步成功");
+    return { success: true };
+
+  } catch (err) {
+    // 5. 兜底逻辑：POST 失败时尝试全量拉取一次
+    try {
+      const pullRes = await syncPull<SyncSnapshot>(syncKey);
+      if (pullRes.data) {
+        applySnapshot(pullRes.data);
+        setLastSyncTime(pullRes.lastSyncTime);
+        toast("已从云端恢复数据");
         return { success: true };
       }
-      throw pushError;
+    } catch {
+      const msg = err instanceof Error ? err.message : "同步失败";
+      toast.error(msg);
+      return { success: false, error: msg };
     }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "数据同步失败";
-    toast.error(`数据同步失败: ${errorMessage}`);
-    return { success: false, error: errorMessage };
+    return { success: false, error: "未知同步错误" };
   }
 }

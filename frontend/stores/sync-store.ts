@@ -9,6 +9,8 @@ interface SyncState {
 
   setSyncKey: (key: string) => void;
   clearSyncKey: () => void;
+  /** 清除密钥及同步时间（密钥失效时使用） */
+  clearSyncConfig: () => void;
   setLastSyncTime: (time: number) => void;
 }
 
@@ -23,6 +25,7 @@ export const useSyncStore = create<SyncState>()(
         checkAndSync()
       },
       clearSyncKey: () => set({ syncKey: null }),
+      clearSyncConfig: () => set({ syncKey: null, lastSyncTime: 0 }),
       setLastSyncTime: (time) => set({ lastSyncTime: time }),
     }),
     {

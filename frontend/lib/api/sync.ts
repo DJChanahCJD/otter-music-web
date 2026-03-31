@@ -5,12 +5,9 @@ export type SyncCheckResponse = {
   lastSyncTime: number;
 };
 
-export type SyncPullResponse = {
-  data: unknown;
-  lastSyncTime: number;
-};
-
-export type SyncPushResponse = {
+// 后端 POST / 和 GET /pull 返回的结构是一样的
+export type SyncDataResponse<T = unknown> = {
+  data: T;
   lastSyncTime: number;
 };
 
@@ -25,7 +22,7 @@ function getAuthHeaders(syncKey: string) {
  */
 export async function syncCheck(syncKey: string): Promise<SyncCheckResponse> {
   return unwrap<SyncCheckResponse>(
-    client.sync.check.$get({
+    client.sync.v2.check.$get({
       header: getAuthHeaders(syncKey),
     })
   );
@@ -34,26 +31,25 @@ export async function syncCheck(syncKey: string): Promise<SyncCheckResponse> {
 /**
  * 拉取同步数据
  */
-export async function syncPull(syncKey: string): Promise<SyncPullResponse> {
-  return unwrap<SyncPullResponse>(
-    client.sync.$get({
+export async function syncPull<T = unknown>(syncKey: string): Promise<SyncDataResponse<T>> {
+  return unwrap<SyncDataResponse<T>>(
+    client.sync.v2.pull.$get({
       header: getAuthHeaders(syncKey),
     })
   );
 }
 
 /**
- * 推送同步数据
+ * 推送并拉取（一趟式 Push & Pull，服务端执行 LWW 合并）
  */
-export async function syncPush(
+export async function syncPushAndPull<T = unknown>(
   syncKey: string,
-  data: unknown,
-  lastSyncTime: number
-): Promise<SyncPushResponse> {
-  return unwrap<SyncPushResponse>(
-    client.sync.$post({
+  data: T
+): Promise<SyncDataResponse<T>> {
+  return unwrap<SyncDataResponse<T>>(
+    client.sync.v2.$post({
       header: getAuthHeaders(syncKey),
-      json: { data, lastSyncTime },
+      json: { data },
     })
   );
 }

@@ -45,9 +45,11 @@ describe("Sync API", function () {
 
   let createdKey, testKeyWithPrefix, adminCookie;
   
-  // 封装快捷推送方法
-  const pushSyncData = (bearer, data) => fetchJson(`/sync`, { method: "POST", bearer, cookie: adminCookie, json: { data } });
-  const pullSyncData = (bearer) => fetchJson(`/sync`, { bearer, cookie: adminCookie });
+  // 封装快捷推送方法 (POST /sync/v2 已经是 push + pull 二合一)
+  const pushSyncData = (bearer, data) => fetchJson(`/sync/v2`, { method: "POST", bearer, cookie: adminCookie, json: { data } });
+  
+  // 拉取数据调用 /sync/v2/pull
+  const pullSyncData = (bearer) => fetchJson(`/sync/v2/pull`, { bearer, cookie: adminCookie });
 
   before(async function () {
     adminCookie = await loginAndGetCookie();
@@ -55,40 +57,40 @@ describe("Sync API", function () {
 
   after(async function () {
     for (const key of [createdKey, testKeyWithPrefix]) {
-      if (key) await fetchApi(`/sync/keys/${key}`, { method: "DELETE", cookie: adminCookie });
+      if (key) await fetchApi(`/sync/v2/keys/${key}`, { method: "DELETE", cookie: adminCookie });
     }
   });
 
   describe("POST /sync/create-key", function () {
     it("should create key without prefix", async function () {
-      const { data } = await fetchJson(`/sync/create-key`, { method: "POST", cookie: adminCookie, json: {} });
+      const { data } = await fetchJson(`/sync/v2/create-key`, { method: "POST", cookie: adminCookie, json: {} });
       assert.ok(data.syncKey);
       createdKey = data.syncKey;
     });
 
     it("should create key with prefix", async function () {
-      const { data } = await fetchJson(`/sync/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "test" } });
+      const { data } = await fetchJson(`/sync/v2/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "test" } });
       assert.ok(data.syncKey.startsWith("test_"));
       testKeyWithPrefix = data.syncKey;
     });
 
     it("should fail with invalid prefix", async function () {
-      await fetchJson(`/sync/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "invalid prefix" } }, 400);
-      await fetchJson(`/sync/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "a".repeat(21) } }, 400);
+      await fetchJson(`/sync/v2/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "invalid prefix" } }, 400);
+      await fetchJson(`/sync/v2/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "a".repeat(21) } }, 400);
     });
   });
 
   describe("GET /sync/keys", function () {
     it("should list all keys", async function () {
-      const { data } = await fetchJson(`/sync/keys`, { cookie: adminCookie });
+      const { data } = await fetchJson(`/sync/v2/keys`, { cookie: adminCookie });
       const keys = data.keys.map(k => k.key);
       assert.ok(keys.includes(createdKey) && keys.includes(testKeyWithPrefix));
     });
   });
 
-  describe("GET /sync (Bearer Auth)", function () {
+  describe("GET /sync/pull & /check (Bearer Auth)", function () {
     it("should check sync status", async function () {
-      const { data } = await fetchJson(`/sync/check`, { bearer: createdKey, cookie: adminCookie });
+      const { data } = await fetchJson(`/sync/v2/check`, { bearer: createdKey, cookie: adminCookie });
       assert.ok(typeof data.lastSyncTime === "number");
     });
 
@@ -98,9 +100,9 @@ describe("Sync API", function () {
     });
 
     it("should fail with invalid authorization", async function () {
-      await fetchJson(`/sync`, { bearer: "invalid_key", cookie: adminCookie }, 404);
-      await fetchJson(`/sync`, { cookie: adminCookie }, 401);
-      await fetchJson(`/sync`, { cookie: adminCookie, headers: { Authorization: "InvalidBearer x" } }, 401);
+      await fetchJson(`/sync/v2/pull`, { bearer: "invalid_key", cookie: adminCookie }, 404);
+      await fetchJson(`/sync/v2/pull`, { cookie: adminCookie }, 401);
+      await fetchJson(`/sync/v2/pull`, { cookie: adminCookie, headers: { Authorization: "InvalidBearer x" } }, 401);
     });
   });
 
@@ -117,12 +119,12 @@ describe("Sync API", function () {
     let lwwKey;
 
     beforeEach(async function () {
-      const { data } = await fetchJson(`/sync/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "lww" } });
+      const { data } = await fetchJson(`/sync/v2/create-key`, { method: "POST", cookie: adminCookie, json: { prefix: "lww" } });
       lwwKey = data.syncKey;
     });
 
     afterEach(async function () {
-      if (lwwKey) await fetchApi(`/sync/keys/${lwwKey}`, { method: "DELETE", cookie: adminCookie });
+      if (lwwKey) await fetchApi(`/sync/v2/keys/${lwwKey}`, { method: "DELETE", cookie: adminCookie });
     });
 
     it("should keep tombstone when stale live record arrives", async function () {
@@ -155,7 +157,8 @@ describe("Sync API", function () {
       assert.ok(playlist && !playlist.is_deleted && playlist.name === "revived_by_B");
     });
 
-    it("should gc tombstones older than 30 days and keep recent", async function () {
+    // 适配后端的 7 天 GC 逻辑
+    it("should gc tombstones older than 7 days and keep recent", async function () {
       const now = Date.now();
       const oldTs = now - 8 * 24 * 60 * 60 * 1000;    // 8 天前，应该被清理
       const recentTs = now - 2 * 24 * 60 * 60 * 1000; // 2 天前，应该被保留
@@ -201,13 +204,13 @@ describe("Sync API", function () {
 
   describe("DELETE /sync/keys/:key", function () {
     it("should delete key and verify missing", async function () {
-      await fetchJson(`/sync/keys/${createdKey}`, { method: "DELETE", cookie: adminCookie });
-      await fetchJson(`/sync`, { bearer: createdKey, cookie: adminCookie }, 404);
+      await fetchJson(`/sync/v2/keys/${createdKey}`, { method: "DELETE", cookie: adminCookie });
+      await fetchJson(`/sync/v2/pull`, { bearer: createdKey, cookie: adminCookie }, 404);
       createdKey = null; // 标记已删除避免重复清理
     });
 
     it("should fail to delete non-existent key", async function () {
-      await fetchJson(`/sync/keys/non_existent_key_123`, { method: "DELETE", cookie: adminCookie }, 404);
+      await fetchJson(`/sync/v2/keys/non_existent_key_123`, { method: "DELETE", cookie: adminCookie }, 404);
     });
   });
 });

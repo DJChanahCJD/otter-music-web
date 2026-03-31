@@ -4,6 +4,7 @@ import { proxyRoutes } from './routes/proxy';
 import { updateRoutes } from './routes/update';
 import { musicRoutes } from './routes/music';
 import { syncRoutes } from './routes/sync';
+import { syncRoutesV2 } from './routes/sync-v2';
 import { podcastRoutes } from './routes/api';
 
 import { Hono } from 'hono';
@@ -30,6 +31,7 @@ app.route('/proxy', proxyRoutes);
 app.route('/update', updateRoutes);
 app.route('/music-api', musicRoutes);
 app.route('/sync', syncRoutes);
+app.route('/sync/v2', syncRoutesV2)
 app.route('/podcast-api', podcastRoutes);
 
 // Export AppType for RPC
