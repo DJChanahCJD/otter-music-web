@@ -15,6 +15,72 @@ const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 type SyncRecord = { id: string; update_time: number; is_deleted: boolean } & Record<string, any>;
 type SyncPlaylist = SyncRecord & { tracks: SyncRecord[] };
 
+/* ---------------- KV 存储层压缩（deflate-raw） ---------------- */
+
+const COMPRESS_PREFIX = "z1:";
+const COMPRESS_THRESHOLD = 1024; // 小于 1 KB 不压缩
+
+async function deflateToBase64(str: string): Promise<string> {
+  const input = new TextEncoder().encode(str);
+  const cs = new CompressionStream("deflate-raw");
+  const writer = cs.writable.getWriter();
+  writer.write(input);
+  writer.close();
+  const chunks: Uint8Array[] = [];
+  const reader = cs.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) { buf.set(c, offset); offset += c.length; }
+  return btoa(String.fromCharCode(...buf));
+}
+
+async function inflateFromBase64(b64: string): Promise<string> {
+  const binary = atob(b64);
+  const input = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) input[i] = binary.charCodeAt(i);
+  const ds = new DecompressionStream("deflate-raw");
+  const writer = ds.writable.getWriter();
+  writer.write(input);
+  writer.close();
+  const chunks: Uint8Array[] = [];
+  const reader = ds.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(
+    chunks.reduce((acc, c) => {
+      const merged = new Uint8Array(acc.length + c.length);
+      merged.set(acc);
+      merged.set(c, acc.length);
+      return merged;
+    }, new Uint8Array(0))
+  );
+}
+
+/** 将 syncData 序列化并压缩后写入 KV */
+async function serializeForKV(data: any): Promise<string> {
+  const json = JSON.stringify(data);
+  if (json.length < COMPRESS_THRESHOLD) return json;
+  return COMPRESS_PREFIX + await deflateToBase64(json);
+}
+
+/** 从 KV 读取并解压、反序列化 syncData */
+async function deserializeFromKV(raw: string | null): Promise<any> {
+  if (!raw) return {};
+  const json = raw.startsWith(COMPRESS_PREFIX)
+    ? await inflateFromBase64(raw.slice(COMPRESS_PREFIX.length))
+    : raw;
+  return JSON.parse(json);
+}
+
 /* ---------------- 核心工具函数 ---------------- */
 
 const generateKey = (prefix?: string) => {
@@ -86,23 +152,20 @@ syncRoutesV2.get("/check", async (c) => {
   return ok(c, { lastSyncTime: metadata?.lastSyncTime ?? 0 });
 });
 
-// 保留原有的 GET 接口，作为客户端纯 Pull 的兜底
 syncRoutesV2.get("/pull", async (c) => {
   const kv = c.env.oh_file_url;
   const { value, metadata } = await kv.getWithMetadata<SyncKeyMetadata>(c.get("kvKey"));
   if (value === null) return fail(c, "Sync key not found", 404);
 
   const serverTime = metadata?.lastSyncTime ?? 0;
-  // GET 接口仅作返回，不执行写入操作，减少 KV 开销
-  const cleanedData = gcSyncData(sanitizeSyncData(value ? JSON.parse(value) : {}), Date.now());
+  const cleanedData = gcSyncData(sanitizeSyncData(await deserializeFromKV(value)), Date.now());
 
   return ok(c, { data: cleanedData, lastSyncTime: serverTime });
 });
 
-// 合并后直接下发全量最终数据
 syncRoutesV2.post(
   "/",
-  zValidator("json", z.object({ data: z.any() })), // 不需要校验 lastSyncTime, 因为 LWW 根据每一项的 updatedTime 决定是否覆盖
+  zValidator("json", z.object({ data: z.any() })),
   async (c) => {
     const kv = c.env.oh_file_url;
     const kvKey = c.get("kvKey");
@@ -112,23 +175,20 @@ syncRoutesV2.post(
     if (existing === null) return fail(c, "Sync key not found", 404);
 
     const now = Date.now();
-    const serverData = gcSyncData(sanitizeSyncData(existing ? JSON.parse(existing) : {}), now);
+    const serverData = gcSyncData(sanitizeSyncData(await deserializeFromKV(existing)), now);
     const clientData = gcSyncData(sanitizeSyncData(clientRaw), now);
 
     const mergedData = {
       ...serverData,
       ...clientData,
       favorites: mergeLWW(serverData.favorites, clientData.favorites),
-
       playlists: mergeLWW(serverData.playlists, clientData.playlists, (s, c) => {
-        // 谁的歌单整体 update_time 新，就完全听谁的
-        // 属性和歌曲列表（tracks）都作为整体跟随胜者
         return c.update_time >= s.update_time ? c : s;
       }),
     };
 
     const newVersion = Date.now();
-    await kv.put(kvKey, JSON.stringify(mergedData), {
+    await kv.put(kvKey, await serializeForKV(mergedData), {
       metadata: { lastSyncTime: newVersion } satisfies SyncKeyMetadata,
     });
 
@@ -137,7 +197,7 @@ syncRoutesV2.post(
 );
 
 /* ===============================
- * 管理端 API (创建、列出、删除 Key 保持不变)
+ * 管理端 API
  * =============================== */
 syncRoutesV2.post("/create-key", authMiddleware, zValidator("json", z.object({ prefix: z.string().min(1).max(20).regex(/^[a-z0-9_-]+$/i).optional() })), async (c) => {
   const { prefix } = c.req.valid("json");
