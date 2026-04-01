@@ -2,7 +2,7 @@ import { toast } from "sonner";
 import { ApiError } from "@/lib/api/config";
 import { useSyncStore } from "@/stores/sync-store";
 import { useMusicStore } from "@/stores/music-store";
-import { syncCheck, syncPull, syncPushAndPull } from "@/lib/api/sync";
+import { syncPull, syncPushAndPull } from "@/lib/api/sync";
 import { MusicTrack, Playlist } from "@shared/types";
 import { MergedMusicTrack } from "@/lib/types/music";
 
@@ -37,47 +37,45 @@ const applySnapshot = (data: SyncSnapshot) => {
 
 /**
  * 数据同步 (V2: 一趟式同步)
- * - syncCheck 检查版本
- * - syncPushAndPull 推送本地快照并拉取服务端 LWW 合并结果
+ * - 携带 clientVersion（本地 lastSyncTime）随 POST 发出，后端两级短路判断
+ * - 服务端版本一致时直接返回 No changes，无需独立 syncCheck 请求
  * - POST 失败时 syncPull 兜底
  */
 export async function checkAndSync(force = false): Promise<SyncResult> {
   const { syncKey, lastSyncTime, setLastSyncTime, clearSyncConfig } = useSyncStore.getState();
   if (!syncKey) return { success: false, error: "未配置同步密钥" };
 
+  // 本地节流：非强制同步且本地最近刚同步过（1小时内），直接跳过
+  if (!force && lastSyncTime > 0 && Date.now() - lastSyncTime < SYNC_INTERVAL) {
+    return { success: true, skipped: true };
+  }
+
   try {
-    // 1. 获取云端最新版本号
-    let serverTime: number;
-    try {
-      ({ lastSyncTime: serverTime } = await syncCheck(syncKey));
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        clearSyncConfig();
-        toast.error("同步密钥不存在或已失效");
-        return { success: false, error: "密钥失效" };
-      }
-      throw err;
-    }
+    // 一趟式 Push & Pull，携带 clientVersion 供后端短路判断
+    const response = await syncPushAndPull<SyncSnapshot>(syncKey, getSnapshot(), lastSyncTime);
 
-    // 2. 节流：非强制同步，且云端没有新数据，且本地最近刚同步过，则跳过
-    if (!force && serverTime === lastSyncTime && lastSyncTime > 0) {
-      if (Date.now() - serverTime < SYNC_INTERVAL) return { success: true, skipped: true };
-    }
-
-    // 3. 一趟式 Push & Pull（无论云端是否有更新，直接发送本地快照进行 LWW 合并）
-    const response = await syncPushAndPull<SyncSnapshot>(syncKey, getSnapshot());
-
-    // 4. 无条件信任服务端合并后的权威结果
-    if (response.data) {
-      applySnapshot(response.data);
+    if (response.data === null) {
+      // Level 1 短路：服务端版本一致，本地数据无需更新
       setLastSyncTime(response.lastSyncTime);
+      return { success: true, skipped: true };
     }
 
-    toast.success(serverTime > lastSyncTime ? "已同步云端新数据" : "同步成功");
+    // 无条件信任服务端合并后的权威结果
+    applySnapshot(response.data);
+    setLastSyncTime(response.lastSyncTime);
+
+    const isNewData = response.lastSyncTime > lastSyncTime;
+    toast.success(isNewData ? "已同步云端新数据" : "同步成功");
     return { success: true };
 
   } catch (err) {
-    // 5. 兜底逻辑：POST 失败时尝试全量拉取一次
+    if (err instanceof ApiError && err.status === 404) {
+      clearSyncConfig();
+      toast.error("同步密钥不存在或已失效");
+      return { success: false, error: "密钥失效" };
+    }
+
+    // 兜底逻辑：POST 失败时尝试全量拉取一次
     try {
       const pullRes = await syncPull<SyncSnapshot>(syncKey);
       if (pullRes.data) {
@@ -94,3 +92,4 @@ export async function checkAndSync(force = false): Promise<SyncResult> {
     return { success: false, error: "未知同步错误" };
   }
 }
+

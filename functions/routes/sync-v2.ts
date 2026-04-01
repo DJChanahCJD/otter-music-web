@@ -119,6 +119,24 @@ function mergeLWW<T extends SyncRecord>(server: T[], client: T[]): T[] {
   ];
 }
 
+// count:maxUpdateTime 轻量指纹（仅覆盖 favorites/playlists 列表，用于 GC 变化检测）
+const getFingerprint = (d: ReturnType<typeof formatData>): string => {
+  let count = d.favorites.length, maxT = 0;
+  for (const f of d.favorites) { if (f.update_time > maxT) maxT = f.update_time; }
+  for (const p of d.playlists) {
+    count += 1 + p.tracks.length;
+    if (p.update_time > maxT) maxT = p.update_time;
+    for (const t of p.tracks) { if (t.update_time > maxT) maxT = t.update_time; }
+  }
+  return `${count}:${maxT}`;
+};
+
+// 提取非列表字段，用于 Level 2 短路的额外对比
+const getExtraFields = (d: ReturnType<typeof formatData>): string => {
+  const { favorites: _f, playlists: _p, ...extra } = d as any;
+  return JSON.stringify(extra); // 对比 favorites/playlists 之外的字段
+};
+
 // 生成随机 syncKey，可携带自定义前缀
 const generateKey = (prefix?: string) => {
   const code = Array.from(
@@ -152,38 +170,74 @@ syncRoutesV2.get("/check", async (c) => {
     : ok(c, { lastSyncTime: metadata.lastSyncTime || 0 });
 });
 
-// GET /pull — 拉取数据（自动 GC 墓碑）
+// GET /pull — 拉取数据（自动 GC 墓碑，有变化时异步写回）
 syncRoutesV2.get("/pull", async (c) => {
-  const { value, metadata } = await c.env.oh_file_url
+  const kv = c.env.oh_file_url;
+  const { value, metadata } = await kv
     .getWithMetadata<SyncKeyMetadata>(c.get("kvKey"), { type: "arrayBuffer" });
   if (value === null) return fail(c, "Sync key not found", 404);
 
-  const data = gcData(formatData(await deserializeFromKV(value)), Date.now());
+  const raw  = formatData(await deserializeFromKV(value));
+  const now  = Date.now();
+  const data = gcData(raw, now);
+
+  // GC 有条目被清理时，异步写回（lastSyncTime 保持原值，不触发客户端拉取）
+  if (getFingerprint(data) !== getFingerprint(raw)) {
+    c.executionCtx.waitUntil(
+      serializeForKV(data).then(buf =>
+        kv.put(c.get("kvKey"), buf, {
+          metadata: { lastSyncTime: metadata?.lastSyncTime || 0 } satisfies SyncKeyMetadata,
+        })
+      )
+    );
+  }
+
   return ok(c, { data, lastSyncTime: metadata?.lastSyncTime || 0 });
 });
 
 // POST / — 推送并合并（LWW），返回合并结果
-syncRoutesV2.post("/", zValidator("json", z.object({ data: z.any() })), async (c) => {
-  const kv     = c.env.oh_file_url;
-  const kvKey  = c.get("kvKey");
-  const stored = await kv.get(kvKey, "arrayBuffer");
-  if (stored === null) return fail(c, "Sync key not found", 404);
+// clientVersion 为前端持有的 lastSyncTime，用于两级短路跳过无意义写入
+syncRoutesV2.post(
+  "/",
+  zValidator("json", z.object({ data: z.any(), clientVersion: z.number().optional() })),
+  async (c) => {
+    const kv    = c.env.oh_file_url;
+    const kvKey = c.get("kvKey");
+    const { value: stored, metadata } = await kv.getWithMetadata<SyncKeyMetadata>(kvKey, { type: "arrayBuffer" });
+    if (stored === null) return fail(c, "Sync key not found", 404);
 
-  const now        = Date.now();
-  const serverData = gcData(formatData(await deserializeFromKV(stored)), now);
-  const clientData = gcData(formatData(c.req.valid("json").data), now);
+    const serverVersion = metadata?.lastSyncTime || 0;
+    const { data: clientData, clientVersion } = c.req.valid("json");
 
-  const merged = {
-    ...serverData, ...clientData,
-    favorites: mergeLWW(serverData.favorites, clientData.favorites),
-    playlists: mergeLWW(serverData.playlists, clientData.playlists),
-  };
+    // Level 1 短路：客户端版本与服务端一致，跳过反序列化与合并
+    if (clientVersion !== undefined && clientVersion === serverVersion) {
+      return ok(c, { data: null, lastSyncTime: serverVersion }, "No changes");
+    }
 
-  await kv.put(kvKey, await serializeForKV(merged), {
-    metadata: { lastSyncTime: now } satisfies SyncKeyMetadata,
-  });
-  return ok(c, { data: merged, lastSyncTime: now }, "Sync successful");
-});
+    // 正常 LWW 合并
+    const now        = Date.now();
+    const serverData = gcData(formatData(await deserializeFromKV(stored)), now);
+    const client     = gcData(formatData(clientData), now);
+    const merged = {
+      ...serverData, ...client,
+      favorites: mergeLWW(serverData.favorites, client.favorites),
+      playlists: mergeLWW(serverData.playlists, client.playlists),
+    };
+
+    // Level 2 短路：合并结果与服务端完全一致（列表指纹 + 额外字段），跳过 kv.put
+    if (
+      getFingerprint(merged) === getFingerprint(serverData) &&
+      getExtraFields(merged) === getExtraFields(serverData)
+    ) {
+      return ok(c, { data: merged, lastSyncTime: serverVersion }, "No changes");
+    }
+
+    await kv.put(kvKey, await serializeForKV(merged), {
+      metadata: { lastSyncTime: now } satisfies SyncKeyMetadata,
+    });
+    return ok(c, { data: merged, lastSyncTime: now }, "Sync successful");
+  }
+);
 
 // ---- 管理端（需 Cookie 认证）----
 
