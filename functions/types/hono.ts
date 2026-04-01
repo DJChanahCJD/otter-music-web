@@ -4,7 +4,7 @@ export interface KVNamespace {
   put(key: string, value: any, options?: any): Promise<void>;
   delete(key: string): Promise<void>;
   list(options?: any): Promise<any>;
-  getWithMetadata<T = unknown>(key: string): Promise<{ value: any; metadata: T }>;
+  getWithMetadata<T = unknown>(key: string, options?: { type?: "text" | "json" | "arrayBuffer" | "stream" }): Promise<{ value: any; metadata: T | null }>;
 }
 
 export type Env = {

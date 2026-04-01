@@ -6,232 +6,231 @@ import { ok, fail } from "@utils/response";
 import { authMiddleware } from "middleware/auth";
 import { SYNC_KEY_PREFIX, SyncKeyMetadata } from "@shared/types";
 
+// ================================================================
+// 类型 & 常量
+// ================================================================
+
 type Variables = { syncKey: string; kvKey: string };
 export const syncRoutesV2 = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-const TOMBSTONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 7天
-const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-type SyncRecord = { id: string; update_time: number; is_deleted: boolean } & Record<string, any>;
+type SyncRecord   = { id: string; update_time: number; is_deleted: boolean; [k: string]: any };
 type SyncPlaylist = SyncRecord & { tracks: SyncRecord[] };
 
-/* ---------------- KV 存储层压缩（deflate-raw） ---------------- */
+const TOMBSTONE_TTL_MS   = 7 * 24 * 60 * 60 * 1000;       // 墓碑保留 7 天
+const ALPHABET           = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const COMPRESS_THRESHOLD = 1024;                            // 小于此字节数不压缩
+const MAGIC_RAW          = 0x00;                            // 小于COMPRESS_THRESHOLD, 直接存 JSON 的二进制，并在开头放一个 0x00
+const MAGIC_DEFLATE      = 0x7a;                            // 0x7a = 122 = 'z'
 
-const COMPRESS_PREFIX = "z1:";
-const COMPRESS_THRESHOLD = 1024; // 小于 1 KB 不压缩
+// ================================================================
+// KV 序列化：写入格式 = [1字节魔术头 | payload]
+// ================================================================
 
-async function deflateToBase64(str: string): Promise<string> {
-  const input = new TextEncoder().encode(str);
+// 利用 Response 收集 ReadableStream 到 Uint8Array
+const streamToU8 = (s: ReadableStream) =>
+  new Response(s).arrayBuffer().then(b => new Uint8Array(b));
+
+async function deflate(input: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream("deflate-raw");
-  const writer = cs.writable.getWriter();
-  writer.write(input);
-  writer.close();
-  const chunks: Uint8Array[] = [];
-  const reader = cs.readable.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  const total = chunks.reduce((n, c) => n + c.length, 0);
-  const buf = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) { buf.set(c, offset); offset += c.length; }
-  return btoa(String.fromCharCode(...buf));
+  const w  = cs.writable.getWriter();
+  await w.write(input).finally(() => w.close());
+  return streamToU8(cs.readable);
 }
 
-async function inflateFromBase64(b64: string): Promise<string> {
-  const binary = atob(b64);
-  const input = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) input[i] = binary.charCodeAt(i);
+async function inflate(input: Uint8Array): Promise<string> {
   const ds = new DecompressionStream("deflate-raw");
-  const writer = ds.writable.getWriter();
-  writer.write(input);
-  writer.close();
-  const chunks: Uint8Array[] = [];
-  const reader = ds.readable.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
+  const w  = ds.writable.getWriter();
+  await w.write(input).finally(() => w.close());
+  return new TextDecoder().decode(await streamToU8(ds.readable));
+}
+
+async function serializeForKV(data: unknown): Promise<ArrayBuffer> {
+  const utf8    = new TextEncoder().encode(JSON.stringify(data));
+  const isRaw   = utf8.length < COMPRESS_THRESHOLD;
+  const payload = isRaw ? utf8 : await deflate(utf8);
+
+  const out = new Uint8Array(1 + payload.length);
+  out[0] = isRaw ? MAGIC_RAW : MAGIC_DEFLATE;
+  out.set(payload, 1);
+  return out.buffer;
+}
+
+async function deserializeFromKV(buf: ArrayBuffer | null): Promise<any> {
+  if (!buf || buf.byteLength === 0) return {};
+  const bytes   = new Uint8Array(buf);
+  const magic   = bytes[0];
+  const payload = bytes.slice(1);
+
+  if (magic === MAGIC_DEFLATE) return JSON.parse(await inflate(payload));
+  if (magic === MAGIC_RAW)     return JSON.parse(new TextDecoder().decode(payload));
+
+  // 兼容旧格式 "z1:<base64>"
+  const str = new TextDecoder().decode(bytes);
+  if (str.startsWith("z1:")) {
+    const raw = Uint8Array.from(atob(str.slice(3)), c => c.charCodeAt(0));
+    return JSON.parse(await inflate(raw));
   }
-  return new TextDecoder().decode(
-    chunks.reduce((acc, c) => {
-      const merged = new Uint8Array(acc.length + c.length);
-      merged.set(acc);
-      merged.set(c, acc.length);
-      return merged;
-    }, new Uint8Array(0))
-  );
+  return str ? JSON.parse(str) : {};
 }
 
-/** 将 syncData 序列化并压缩后写入 KV */
-async function serializeForKV(data: any): Promise<string> {
-  const json = JSON.stringify(data);
-  if (json.length < COMPRESS_THRESHOLD) return json;
-  return COMPRESS_PREFIX + await deflateToBase64(json);
-}
+// ================================================================
+// 数据处理：规范化 / GC / LWW 合并
+// ================================================================
 
-/** 从 KV 读取并解压、反序列化 syncData */
-async function deserializeFromKV(raw: string | null): Promise<any> {
-  if (!raw) return {};
-  const json = raw.startsWith(COMPRESS_PREFIX)
-    ? await inflateFromBase64(raw.slice(COMPRESS_PREFIX.length))
-    : raw;
-  return JSON.parse(json);
-}
+// 补全缺失字段，过滤无效条目
+const sanitizeObj = (v: any): SyncRecord | null =>
+  v?.id && typeof v.id === "string"
+    ? { ...v, update_time: v.update_time || 0, is_deleted: !!v.is_deleted }
+    : null;
 
-/* ---------------- 核心工具函数 ---------------- */
+const sanitizeList = <T>(v: any): T[] =>
+  Array.isArray(v) ? v.map(sanitizeObj).filter(Boolean) as T[] : [];
 
-const generateKey = (prefix?: string) => {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  const code = Array.from(bytes).map(b => ALPHABET[b % ALPHABET.length]).join("");
-  return prefix ? `${prefix}_${code}` : code;
-};
-
-const sanitizeRecord = (v: any): SyncRecord | null =>
-  (v?.id && typeof v.id === "string" ? { ...v, update_time: Number.isFinite(v.update_time) ? v.update_time : 0, is_deleted: Boolean(v.is_deleted) } : null);
-
-const sanitizeList = <T>(v: any): T[] => (Array.isArray(v) ? (v.map(sanitizeRecord).filter(Boolean) as unknown as T[]) : []);
-
-const sanitizeSyncData = (v: any) => ({
-  ...(typeof v === "object" && v ? v : {}),
+// 保证 favorites / playlists 结构完整
+const formatData = (v: any) => ({
+  ...(v || {}),
   favorites: sanitizeList<SyncRecord>(v?.favorites),
-  playlists: sanitizeList<SyncPlaylist>(v?.playlists).map(p => ({ ...p, tracks: sanitizeList<SyncRecord>(p.tracks) }))
+  playlists: sanitizeList<SyncPlaylist>(v?.playlists)
+    .map(p => ({ ...p, tracks: sanitizeList<SyncRecord>(p.tracks) })),
 });
 
-// 核心 LWW 合并：使用 >= 确保极端并发时以最新到达的客户端为准
-function mergeLWW<T extends SyncRecord>(server: T[], client: T[], mergeChildren?: (s: T, c: T) => T): T[] {
-  const map = new Map<string, T>(server.map(item => [item.id, item]));
-  const order = server.map(item => item.id);
-  const newIds: string[] = [];
-
-  for (const c of client) {
-    const s = map.get(c.id);
-    if (!s) {
-      map.set(c.id, c);
-      newIds.push(c.id);
-    } else {
-      const winner = c.update_time >= s.update_time ? c : s;
-      const merged = mergeChildren ? mergeChildren(s, c) : winner;
-      map.set(c.id, { ...merged, update_time: winner.update_time, is_deleted: winner.is_deleted });
-    }
-  }
-  return [...newIds, ...order].map(id => map.get(id)!);
-}
-
-function gcSyncData(data: ReturnType<typeof sanitizeSyncData>, now: number) {
-  const gc = <T extends SyncRecord>(list: T[]) => list.filter(r => !(r.is_deleted && now - r.update_time > TOMBSTONE_TTL_MS));
+// 清理超过 TTL 的墓碑记录
+const gcData = (data: ReturnType<typeof formatData>, now: number) => {
+  const gc = <T extends SyncRecord>(list: T[]) =>
+    list.filter(r => !(r.is_deleted && now - r.update_time > TOMBSTONE_TTL_MS));
   return {
     ...data,
     favorites: gc(data.favorites),
-    playlists: gc(data.playlists).map(p => ({ ...p, tracks: gc(p.tracks) }))
+    playlists: gc(data.playlists).map(p => ({ ...p, tracks: gc(p.tracks) })),
   };
-}
-
-/* ---------------- 路由鉴权 ---------------- */
-
-const syncAuthMiddleware = async (c: any, next: Function) => {
-  const match = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]+)$/);
-  if (!match) return fail(c, "Invalid Authorization", 401);
-  c.set("syncKey", match[1]);
-  c.set("kvKey", `${SYNC_KEY_PREFIX}${match[1]}`);
-  await next();
 };
 
-/* ===============================
- * 客户端 API
- * =============================== */
-syncRoutesV2.use("/", syncAuthMiddleware);
-syncRoutesV2.use("/pull", syncAuthMiddleware);
-syncRoutesV2.use("/check", syncAuthMiddleware);
+// Last-Write-Wins 合并：相同 id 保留 update_time 更大的版本；新增条目追加到头部
+function mergeLWW<T extends SyncRecord>(server: T[], client: T[]): T[] {
+  const map = new Map<string, T>(server.map(item => [item.id, item]));
+  for (const c of client) {
+    const s = map.get(c.id);
+    if (!s || c.update_time >= s.update_time) map.set(c.id, c);
+  }
+  const serverIds = new Set(server.map(i => i.id));
+  return [
+    ...client.filter(c => !serverIds.has(c.id)).map(c => map.get(c.id)!), // 新增
+    ...server.map(s => map.get(s.id)!),                                    // 原有（已 LWW 更新）
+  ];
+}
 
+// 生成随机 syncKey，可携带自定义前缀
+const generateKey = (prefix?: string) => {
+  const code = Array.from(
+    crypto.getRandomValues(new Uint8Array(16)),
+    b => ALPHABET[b % ALPHABET.length],
+  ).join("");
+  return prefix ? `${prefix}_${code}` : code;
+};
+
+// ================================================================
+// 路由
+// ================================================================
+
+// Bearer Token 中间件（跳过管理端路径）
+syncRoutesV2.use("/*", async (c, next) => {
+  if (c.req.path.includes("/keys") || c.req.path.includes("/create-key")) return next();
+
+  const token = c.req.header("Authorization")?.match(/^Bearer\s+(\S+)$/)?.[1];
+  if (!token) return fail(c, "Invalid Authorization", 401);
+
+  c.set("syncKey", token);
+  c.set("kvKey", `${SYNC_KEY_PREFIX}${token}`);
+  return next();
+});
+
+// GET /check — 检查 syncKey 是否存在及上次同步时间
 syncRoutesV2.get("/check", async (c) => {
   const { metadata } = await c.env.oh_file_url.getWithMetadata<SyncKeyMetadata>(c.get("kvKey"));
-  if (metadata === null) return fail(c, "Sync key not found", 404);
-  return ok(c, { lastSyncTime: metadata?.lastSyncTime ?? 0 });
+  return metadata === null
+    ? fail(c, "Sync key not found", 404)
+    : ok(c, { lastSyncTime: metadata.lastSyncTime || 0 });
 });
 
+// GET /pull — 拉取数据（自动 GC 墓碑）
 syncRoutesV2.get("/pull", async (c) => {
-  const kv = c.env.oh_file_url;
-  const { value, metadata } = await kv.getWithMetadata<SyncKeyMetadata>(c.get("kvKey"));
+  const { value, metadata } = await c.env.oh_file_url
+    .getWithMetadata<SyncKeyMetadata>(c.get("kvKey"), { type: "arrayBuffer" });
   if (value === null) return fail(c, "Sync key not found", 404);
 
-  const serverTime = metadata?.lastSyncTime ?? 0;
-  const cleanedData = gcSyncData(sanitizeSyncData(await deserializeFromKV(value)), Date.now());
-
-  return ok(c, { data: cleanedData, lastSyncTime: serverTime });
+  const data = gcData(formatData(await deserializeFromKV(value)), Date.now());
+  return ok(c, { data, lastSyncTime: metadata?.lastSyncTime || 0 });
 });
 
+// POST / — 推送并合并（LWW），返回合并结果
+syncRoutesV2.post("/", zValidator("json", z.object({ data: z.any() })), async (c) => {
+  const kv     = c.env.oh_file_url;
+  const kvKey  = c.get("kvKey");
+  const stored = await kv.get(kvKey, "arrayBuffer");
+  if (stored === null) return fail(c, "Sync key not found", 404);
+
+  const now        = Date.now();
+  const serverData = gcData(formatData(await deserializeFromKV(stored)), now);
+  const clientData = gcData(formatData(c.req.valid("json").data), now);
+
+  const merged = {
+    ...serverData, ...clientData,
+    favorites: mergeLWW(serverData.favorites, clientData.favorites),
+    playlists: mergeLWW(serverData.playlists, clientData.playlists),
+  };
+
+  await kv.put(kvKey, await serializeForKV(merged), {
+    metadata: { lastSyncTime: now } satisfies SyncKeyMetadata,
+  });
+  return ok(c, { data: merged, lastSyncTime: now }, "Sync successful");
+});
+
+// ---- 管理端（需 Cookie 认证）----
+
+// POST /create-key — 创建新 syncKey
 syncRoutesV2.post(
-  "/",
-  zValidator("json", z.object({ data: z.any() })),
+  "/create-key",
+  authMiddleware,
+  zValidator("json", z.object({ prefix: z.string().regex(/^[a-z0-9_-]+$/i).max(20).optional() })),
   async (c) => {
-    const kv = c.env.oh_file_url;
-    const kvKey = c.get("kvKey");
-    const { data: clientRaw } = c.req.valid("json");
-
-    const existing = await kv.get(kvKey);
-    if (existing === null) return fail(c, "Sync key not found", 404);
-
-    const now = Date.now();
-    const serverData = gcSyncData(sanitizeSyncData(await deserializeFromKV(existing)), now);
-    const clientData = gcSyncData(sanitizeSyncData(clientRaw), now);
-
-    const mergedData = {
-      ...serverData,
-      ...clientData,
-      favorites: mergeLWW(serverData.favorites, clientData.favorites),
-      playlists: mergeLWW(serverData.playlists, clientData.playlists, (s, c) => {
-        return c.update_time >= s.update_time ? c : s;
-      }),
-    };
-
-    const newVersion = Date.now();
-    await kv.put(kvKey, await serializeForKV(mergedData), {
-      metadata: { lastSyncTime: newVersion } satisfies SyncKeyMetadata,
-    });
-
-    return ok(c, { data: mergedData, lastSyncTime: newVersion }, "Sync successful");
-  }
+    const kv       = c.env.oh_file_url;
+    const { prefix } = c.req.valid("json");
+    for (let i = 0; i < 5; i++) {
+      const syncKey = generateKey(prefix);
+      const kvKey   = `${SYNC_KEY_PREFIX}${syncKey}`;
+      if (!(await kv.get(kvKey, "arrayBuffer"))) {
+        await kv.put(kvKey, new ArrayBuffer(0), { metadata: { lastSyncTime: 0 } });
+        return ok(c, { syncKey }, "Sync key created");
+      }
+    }
+    return fail(c, "Failed to generate unique key", 500);
+  },
 );
 
-/* ===============================
- * 管理端 API
- * =============================== */
-syncRoutesV2.post("/create-key", authMiddleware, zValidator("json", z.object({ prefix: z.string().min(1).max(20).regex(/^[a-z0-9_-]+$/i).optional() })), async (c) => {
-  const { prefix } = c.req.valid("json");
-  const kv = c.env.oh_file_url;
-  for (let i = 0; i < 5; i++) {
-    const syncKey = generateKey(prefix);
-    const kvKey = `${SYNC_KEY_PREFIX}${syncKey}`;
-    if (!(await kv.get(kvKey))) {
-      await kv.put(kvKey, "", { metadata: { lastSyncTime: 0 } });
-      return ok(c, { syncKey }, "Sync key created");
-    }
-  }
-  return fail(c, "Failed to generate unique key", 500);
-});
-
+// GET /keys — 列出所有 syncKey
 syncRoutesV2.get("/keys", authMiddleware, async (c) => {
-  const kv = c.env.oh_file_url;
-  const keys: Array<{ key: string; lastSyncTime: number }> = [];
+  const kv   = c.env.oh_file_url;
+  const keys: { key: string; lastSyncTime: number }[] = [];
   let cursor: string | undefined;
+
   do {
     const result = await kv.list({ prefix: SYNC_KEY_PREFIX, cursor });
-    for (const key of result.keys) {
-      keys.push({ key: key.name.replace(SYNC_KEY_PREFIX, ""), lastSyncTime: (key.metadata as SyncKeyMetadata)?.lastSyncTime ?? 0 });
-    }
+    keys.push(...result.keys.map((k: { name: string; metadata: unknown }) => ({
+      key: k.name.replace(SYNC_KEY_PREFIX, ""),
+      lastSyncTime: (k.metadata as SyncKeyMetadata)?.lastSyncTime || 0,
+    })));
     cursor = result.list_complete ? undefined : result.cursor;
   } while (cursor);
+
   return ok(c, { keys });
 });
 
+// DELETE /keys/:key — 删除指定 syncKey
 syncRoutesV2.delete("/keys/:key", authMiddleware, async (c) => {
-  const syncKey = c.req.param("key");
-  const kvKey = `${SYNC_KEY_PREFIX}${syncKey}`;
-  const kv = c.env.oh_file_url;
+  const kv    = c.env.oh_file_url;
+  const kvKey = `${SYNC_KEY_PREFIX}${c.req.param("key")}`;
   if (await kv.get(kvKey) === null) return fail(c, "Sync key not found", 404);
+
   await kv.delete(kvKey);
   return ok(c, null, "Sync key deleted");
 });
