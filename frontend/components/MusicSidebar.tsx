@@ -77,18 +77,14 @@ export const MusicSidebar = memo(function MusicSidebar({
   onItemClick,
   className,
 }: MusicSidebarProps) {
-  const { playlists, createPlaylist, queue, favorites } = useMusicStore(
+  const { playlists, createPlaylist, queue } = useMusicStore(
     useShallow((state) => ({
       playlists: state.playlists,
       createPlaylist: state.createPlaylist,
       queue: state.queue,
-      favorites: state.favorites,
     })),
   );
 
-  const trashCount =
-    favorites.filter((t) => t.is_deleted).length +
-    playlists.filter((p) => p.is_deleted).length;
 
   // 只显示未删除的歌单
   const activePlaylists = playlists.filter((p) => !p.is_deleted);
@@ -157,27 +153,13 @@ export const MusicSidebar = memo(function MusicSidebar({
             onClick={() => onViewChange("podcast")}
             onItemClick={onItemClick}
           />
-          <div
-            role="button"
-            className={cn(
-              buttonVariants({ variant: "ghost" }),
-              "w-full justify-start gap-2 cursor-pointer group pr-1",
-              currentView === "trash" && "bg-primary/80",
-            )}
-            title="回收站"
-            onClick={() => {
-              onViewChange("trash");
-              onItemClick?.();
-            }}
-          >
-            <Trash2 className="h-4 w-4 shrink-0" />
-            <span className="truncate flex-1 text-left">回收站</span>
-            {trashCount > 0 && (
-              <span className="ml-auto text-[10px] font-medium bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 min-w-[18px] text-center shrink-0">
-                {trashCount}
-              </span>
-            )}
-          </div>
+          <NavItem
+            active={currentView === "trash"}
+            icon={Trash2}
+            label="回收站"
+            onClick={() => onViewChange("trash")}
+            onItemClick={onItemClick}
+          />
         </div>
       </div>
 

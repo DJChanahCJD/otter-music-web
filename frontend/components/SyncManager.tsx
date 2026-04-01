@@ -5,10 +5,18 @@ import { checkAndSync } from "@/lib/sync";
 
 export function SyncManager() {
   useEffect(() => {
-
-    // 立即执行一次检查（checkAndSync 内部会判断时间间隔）
     checkAndSync();
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        checkAndSync();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   return null;
