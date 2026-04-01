@@ -41,7 +41,7 @@ export function TrashView() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-2 px-6 py-4 border-b border-border/40 shrink-0">
         <Trash2 className="w-5 h-5 text-muted-foreground" />
@@ -49,14 +49,15 @@ export function TrashView() {
         <Badge variant="secondary" className="text-xs">{totalCount}</Badge>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="flex-1 min-h-0">
+        <ScrollArea className="h-full">
         <div className="px-4 py-4 space-y-6">
           {/* 已删除收藏 */}
           {deletedFavorites.length > 0 && (
             <section>
               <div className="flex items-center gap-2 mb-3 px-2">
                 <Music2 className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-muted-foreground">已删除的收藏</span>
+                <span className="text-sm font-medium text-muted-foreground">喜欢</span>
                 <Badge variant="outline" className="text-xs">{deletedFavorites.length}</Badge>
               </div>
               <div className="space-y-1">
@@ -78,7 +79,7 @@ export function TrashView() {
             <section>
               <div className="flex items-center gap-2 mb-3 px-2">
                 <ListMusic className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-muted-foreground">已删除的歌单</span>
+                <span className="text-sm font-medium text-muted-foreground">歌单</span>
                 <Badge variant="outline" className="text-xs">{deletedPlaylists.length}</Badge>
               </div>
               <div className="space-y-1">
@@ -97,7 +98,8 @@ export function TrashView() {
             回收站中的项目将在 7 天后自动清除
           </p>
         </div>
-      </ScrollArea>
+        </ScrollArea>
+      </div>
     </div>
   );
 }
@@ -159,7 +161,7 @@ function TrashPlaylistItem({
       <Button
         variant="ghost"
         size="icon"
-        className="h-7 w-7 text-primary hover:bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        className="h-7 w-7 text-primary hover:bg-primary/10 shrink-0"
         title="恢复"
         onClick={onRestore}
       >
