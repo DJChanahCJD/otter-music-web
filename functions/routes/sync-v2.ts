@@ -13,14 +13,14 @@ import { SYNC_KEY_PREFIX, SyncKeyMetadata } from "@shared/types";
 type Variables = { syncKey: string; kvKey: string };
 export const syncRoutesV2 = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-type SyncRecord   = { id: string; update_time: number; is_deleted: boolean; [k: string]: any };
+type SyncRecord = { id: string; update_time: number; is_deleted: boolean; [k: string]: any };
 type SyncPlaylist = SyncRecord & { tracks: SyncRecord[] };
 
-const TOMBSTONE_TTL_MS   = 7 * 24 * 60 * 60 * 1000;       // 墓碑保留 7 天
-const ALPHABET           = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-const COMPRESS_THRESHOLD = 1024;                            // 小于此字节数不压缩
-const MAGIC_RAW          = 0x00;                            // 小于COMPRESS_THRESHOLD, 直接存 JSON 的二进制，并在开头放一个 0x00
-const MAGIC_DEFLATE      = 0x7a;                            // 0x7a = 122 = 'z'
+const TOMBSTONE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 墓碑保留 7 天
+const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const COMPRESS_THRESHOLD = 1024; // 小于此字节数不压缩
+const MAGIC_RAW = 0x00; // 小于 COMPRESS_THRESHOLD，直接存 JSON 的二进制，并在开头放一个 0x00
+const MAGIC_DEFLATE = 0x7a; // 0x7a = 122 = 'z'
 
 // ================================================================
 // KV 序列化：写入格式 = [1字节魔术头 | payload]
@@ -28,25 +28,25 @@ const MAGIC_DEFLATE      = 0x7a;                            // 0x7a = 122 = 'z'
 
 // 利用 Response 收集 ReadableStream 到 Uint8Array
 const streamToU8 = (s: ReadableStream) =>
-  new Response(s).arrayBuffer().then(b => new Uint8Array(b));
+  new Response(s).arrayBuffer().then((b) => new Uint8Array(b));
 
 async function deflate(input: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream("deflate-raw");
-  const w  = cs.writable.getWriter();
+  const w = cs.writable.getWriter();
   await w.write(input).finally(() => w.close());
   return streamToU8(cs.readable);
 }
 
 async function inflate(input: Uint8Array): Promise<string> {
   const ds = new DecompressionStream("deflate-raw");
-  const w  = ds.writable.getWriter();
+  const w = ds.writable.getWriter();
   await w.write(input).finally(() => w.close());
   return new TextDecoder().decode(await streamToU8(ds.readable));
 }
 
 async function serializeForKV(data: unknown): Promise<ArrayBuffer> {
-  const utf8    = new TextEncoder().encode(JSON.stringify(data));
-  const isRaw   = utf8.length < COMPRESS_THRESHOLD;
+  const utf8 = new TextEncoder().encode(JSON.stringify(data));
+  const isRaw = utf8.length < COMPRESS_THRESHOLD;
   const payload = isRaw ? utf8 : await deflate(utf8);
 
   const out = new Uint8Array(1 + payload.length);
@@ -57,17 +57,17 @@ async function serializeForKV(data: unknown): Promise<ArrayBuffer> {
 
 async function deserializeFromKV(buf: ArrayBuffer | null): Promise<any> {
   if (!buf || buf.byteLength === 0) return {};
-  const bytes   = new Uint8Array(buf);
-  const magic   = bytes[0];
+  const bytes = new Uint8Array(buf);
+  const magic = bytes[0];
   const payload = bytes.slice(1);
 
   if (magic === MAGIC_DEFLATE) return JSON.parse(await inflate(payload));
-  if (magic === MAGIC_RAW)     return JSON.parse(new TextDecoder().decode(payload));
+  if (magic === MAGIC_RAW) return JSON.parse(new TextDecoder().decode(payload));
 
   // 兼容旧格式 "z1:<base64>"
   const str = new TextDecoder().decode(bytes);
   if (str.startsWith("z1:")) {
-    const raw = Uint8Array.from(atob(str.slice(3)), c => c.charCodeAt(0));
+    const raw = Uint8Array.from(atob(str.slice(3)), (c) => c.charCodeAt(0));
     return JSON.parse(await inflate(raw));
   }
   return str ? JSON.parse(str) : {};
@@ -84,64 +84,65 @@ const sanitizeObj = (v: any): SyncRecord | null =>
     : null;
 
 const sanitizeList = <T>(v: any): T[] =>
-  Array.isArray(v) ? v.map(sanitizeObj).filter(Boolean) as T[] : [];
+  Array.isArray(v) ? (v.map(sanitizeObj).filter(Boolean) as T[]) : [];
 
 // 保证 favorites / playlists 结构完整
 const formatData = (v: any) => ({
   ...(v || {}),
   favorites: sanitizeList<SyncRecord>(v?.favorites),
-  playlists: sanitizeList<SyncPlaylist>(v?.playlists)
-    .map(p => ({ ...p, tracks: sanitizeList<SyncRecord>(p.tracks) })),
+  playlists: sanitizeList<SyncPlaylist>(v?.playlists).map((p) => ({
+    ...p,
+    tracks: sanitizeList<SyncRecord>(p.tracks),
+  })),
 });
 
 // 清理超过 TTL 的墓碑记录
 const gcData = (data: ReturnType<typeof formatData>, now: number) => {
   const gc = <T extends SyncRecord>(list: T[]) =>
-    list.filter(r => !(r.is_deleted && now - r.update_time > TOMBSTONE_TTL_MS));
+    list.filter((r) => !(r.is_deleted && now - r.update_time > TOMBSTONE_TTL_MS));
   return {
     ...data,
     favorites: gc(data.favorites),
-    playlists: gc(data.playlists).map(p => ({ ...p, tracks: gc(p.tracks) })),
+    playlists: gc(data.playlists).map((p) => ({ ...p, tracks: gc(p.tracks) })),
   };
 };
 
 // Last-Write-Wins 合并：相同 id 保留 update_time 更大的版本；新增条目追加到头部
 function mergeLWW<T extends SyncRecord>(server: T[], client: T[]): T[] {
-  const map = new Map<string, T>(server.map(item => [item.id, item]));
+  const map = new Map<string, T>(server.map((item) => [item.id, item]));
   for (const c of client) {
     const s = map.get(c.id);
     if (!s || c.update_time >= s.update_time) map.set(c.id, c);
   }
-  const serverIds = new Set(server.map(i => i.id));
+  const serverIds = new Set(server.map((i) => i.id));
   return [
-    ...client.filter(c => !serverIds.has(c.id)).map(c => map.get(c.id)!), // 新增
-    ...server.map(s => map.get(s.id)!),                                    // 原有（已 LWW 更新）
+    ...client.filter((c) => !serverIds.has(c.id)).map((c) => map.get(c.id)!),
+    ...server.map((s) => map.get(s.id)!),
   ];
 }
 
-// count:maxUpdateTime 轻量指纹（仅覆盖 favorites/playlists 列表，用于 GC 变化检测）
+// count:maxUpdateTime 轻量指纹（仅用于 pull 时检测 GC 是否产生变化）
 const getFingerprint = (d: ReturnType<typeof formatData>): string => {
-  let count = d.favorites.length, maxT = 0;
-  for (const f of d.favorites) { if (f.update_time > maxT) maxT = f.update_time; }
+  let count = d.favorites.length,
+    maxT = 0;
+  for (const f of d.favorites) {
+    if (f.update_time > maxT) maxT = f.update_time;
+  }
   for (const p of d.playlists) {
     count += 1 + p.tracks.length;
     if (p.update_time > maxT) maxT = p.update_time;
-    for (const t of p.tracks) { if (t.update_time > maxT) maxT = t.update_time; }
+    for (const t of p.tracks) {
+      if (t.update_time > maxT) maxT = t.update_time;
+    }
   }
   return `${count}:${maxT}`;
-};
-
-// 提取非列表字段，用于 Level 2 短路的额外对比
-const getExtraFields = (d: ReturnType<typeof formatData>): string => {
-  const { favorites: _f, playlists: _p, ...extra } = d as any;
-  return JSON.stringify(extra); // 对比 favorites/playlists 之外的字段
 };
 
 // 生成随机 syncKey，可携带自定义前缀
 const generateKey = (prefix?: string) => {
   const code = Array.from(
     crypto.getRandomValues(new Uint8Array(16)),
-    b => ALPHABET[b % ALPHABET.length],
+    (b) => ALPHABET[b % ALPHABET.length],
   ).join("");
   return prefix ? `${prefix}_${code}` : code;
 };
@@ -173,22 +174,23 @@ syncRoutesV2.get("/check", async (c) => {
 // GET /pull — 拉取数据（自动 GC 墓碑，有变化时异步写回）
 syncRoutesV2.get("/pull", async (c) => {
   const kv = c.env.oh_file_url;
-  const { value, metadata } = await kv
-    .getWithMetadata<SyncKeyMetadata>(c.get("kvKey"), { type: "arrayBuffer" });
+  const { value, metadata } = await kv.getWithMetadata<SyncKeyMetadata>(c.get("kvKey"), {
+    type: "arrayBuffer",
+  });
   if (value === null) return fail(c, "Sync key not found", 404);
 
-  const raw  = formatData(await deserializeFromKV(value));
-  const now  = Date.now();
+  const raw = formatData(await deserializeFromKV(value));
+  const now = Date.now();
   const data = gcData(raw, now);
 
   // GC 有条目被清理时，异步写回（lastSyncTime 保持原值，不触发客户端拉取）
   if (getFingerprint(data) !== getFingerprint(raw)) {
     c.executionCtx.waitUntil(
-      serializeForKV(data).then(buf =>
+      serializeForKV(data).then((buf) =>
         kv.put(c.get("kvKey"), buf, {
           metadata: { lastSyncTime: metadata?.lastSyncTime || 0 } satisfies SyncKeyMetadata,
-        })
-      )
+        }),
+      ),
     );
   }
 
@@ -196,47 +198,33 @@ syncRoutesV2.get("/pull", async (c) => {
 });
 
 // POST / — 推送并合并（LWW），返回合并结果
-// clientVersion 为前端持有的 lastSyncTime，用于两级短路跳过无意义写入
 syncRoutesV2.post(
   "/",
-  zValidator("json", z.object({ data: z.any(), clientVersion: z.number().optional() })),
+  zValidator("json", z.object({ data: z.any() })),
   async (c) => {
-    const kv    = c.env.oh_file_url;
+    const kv = c.env.oh_file_url;
     const kvKey = c.get("kvKey");
-    const { value: stored, metadata } = await kv.getWithMetadata<SyncKeyMetadata>(kvKey, { type: "arrayBuffer" });
+    const stored = await kv.get(kvKey, "arrayBuffer");
     if (stored === null) return fail(c, "Sync key not found", 404);
 
-    const serverVersion = metadata?.lastSyncTime || 0;
-    const { data: clientData, clientVersion } = c.req.valid("json");
+    const { data: clientData } = c.req.valid("json");
+    const now = Date.now();
 
-    // Level 1 短路：客户端版本与服务端一致，跳过反序列化与合并
-    if (clientVersion !== undefined && clientVersion === serverVersion) {
-      return ok(c, { data: null, lastSyncTime: serverVersion }, "No changes");
-    }
-
-    // 正常 LWW 合并
-    const now        = Date.now();
     const serverData = gcData(formatData(await deserializeFromKV(stored)), now);
-    const client     = gcData(formatData(clientData), now);
+    const client = gcData(formatData(clientData), now);
     const merged = {
-      ...serverData, ...client,
+      ...serverData,
+      ...client,
       favorites: mergeLWW(serverData.favorites, client.favorites),
       playlists: mergeLWW(serverData.playlists, client.playlists),
     };
 
-    // Level 2 短路：合并结果与服务端完全一致（列表指纹 + 额外字段），跳过 kv.put
-    if (
-      getFingerprint(merged) === getFingerprint(serverData) &&
-      getExtraFields(merged) === getExtraFields(serverData)
-    ) {
-      return ok(c, { data: merged, lastSyncTime: serverVersion }, "No changes");
-    }
-
     await kv.put(kvKey, await serializeForKV(merged), {
       metadata: { lastSyncTime: now } satisfies SyncKeyMetadata,
     });
+
     return ok(c, { data: merged, lastSyncTime: now }, "Sync successful");
-  }
+  },
 );
 
 // ---- 管理端（需 Cookie 认证）----
@@ -245,13 +233,16 @@ syncRoutesV2.post(
 syncRoutesV2.post(
   "/create-key",
   authMiddleware,
-  zValidator("json", z.object({ prefix: z.string().regex(/^[a-z0-9_-]+$/i).max(20).optional() })),
+  zValidator(
+    "json",
+    z.object({ prefix: z.string().regex(/^[a-z0-9_-]+$/i).max(20).optional() }),
+  ),
   async (c) => {
-    const kv       = c.env.oh_file_url;
+    const kv = c.env.oh_file_url;
     const { prefix } = c.req.valid("json");
     for (let i = 0; i < 5; i++) {
       const syncKey = generateKey(prefix);
-      const kvKey   = `${SYNC_KEY_PREFIX}${syncKey}`;
+      const kvKey = `${SYNC_KEY_PREFIX}${syncKey}`;
       if (!(await kv.get(kvKey, "arrayBuffer"))) {
         await kv.put(kvKey, new ArrayBuffer(0), { metadata: { lastSyncTime: 0 } });
         return ok(c, { syncKey }, "Sync key created");
@@ -263,16 +254,18 @@ syncRoutesV2.post(
 
 // GET /keys — 列出所有 syncKey
 syncRoutesV2.get("/keys", authMiddleware, async (c) => {
-  const kv   = c.env.oh_file_url;
+  const kv = c.env.oh_file_url;
   const keys: { key: string; lastSyncTime: number }[] = [];
   let cursor: string | undefined;
 
   do {
     const result = await kv.list({ prefix: SYNC_KEY_PREFIX, cursor });
-    keys.push(...result.keys.map((k: { name: string; metadata: unknown }) => ({
-      key: k.name.replace(SYNC_KEY_PREFIX, ""),
-      lastSyncTime: (k.metadata as SyncKeyMetadata)?.lastSyncTime || 0,
-    })));
+    keys.push(
+      ...result.keys.map((k: { name: string; metadata: unknown }) => ({
+        key: k.name.replace(SYNC_KEY_PREFIX, ""),
+        lastSyncTime: (k.metadata as SyncKeyMetadata)?.lastSyncTime || 0,
+      })),
+    );
     cursor = result.list_complete ? undefined : result.cursor;
   } while (cursor);
 
@@ -281,9 +274,9 @@ syncRoutesV2.get("/keys", authMiddleware, async (c) => {
 
 // DELETE /keys/:key — 删除指定 syncKey
 syncRoutesV2.delete("/keys/:key", authMiddleware, async (c) => {
-  const kv    = c.env.oh_file_url;
+  const kv = c.env.oh_file_url;
   const kvKey = `${SYNC_KEY_PREFIX}${c.req.param("key")}`;
-  if (await kv.get(kvKey) === null) return fail(c, "Sync key not found", 404);
+  if ((await kv.get(kvKey)) === null) return fail(c, "Sync key not found", 404);
 
   await kv.delete(kvKey);
   return ok(c, null, "Sync key deleted");

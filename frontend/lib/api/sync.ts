@@ -41,17 +41,16 @@ export async function syncPull<T = unknown>(syncKey: string): Promise<SyncDataRe
 
 /**
  * 推送并拉取（一趟式 Push & Pull，服务端执行 LWW 合并）
- * clientVersion 为本地持有的 lastSyncTime，服务端用于两级短路跳过无意义写入
+ * 前端仅上传业务数据，服务端返回合并后的权威快照
  */
 export async function syncPushAndPull<T = unknown>(
   syncKey: string,
-  data: T,
-  clientVersion?: number
+  data: T
 ): Promise<SyncDataResponse<T>> {
   return unwrap<SyncDataResponse<T>>(
     client.sync.v2.$post({
       header: getAuthHeaders(syncKey),
-      json: { data, clientVersion },
+      json: { data },
     })
   );
 }

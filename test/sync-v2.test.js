@@ -107,11 +107,15 @@ describe("Sync API", function () {
   });
 
   describe("POST /sync (Push Data)", function () {
-    it("should push and fetch data successfully", async function () {
-      await pushSyncData(createdKey, { test: "hello" });
-      
-      const { data } = await pullSyncData(createdKey);
-      assert.deepEqual(data.data, { favorites: [], playlists: [], test: "hello" });
+    it("should return merged data and persist it successfully", async function () {
+      const beforePush = Date.now();
+      const { data: pushData } = await pushSyncData(createdKey, { test: "hello" });
+
+      assert.deepEqual(pushData.data, { favorites: [], playlists: [], test: "hello" });
+      assert.ok(pushData.lastSyncTime >= beforePush);
+
+      const { data: pullData } = await pullSyncData(createdKey);
+      assert.deepEqual(pullData.data, { favorites: [], playlists: [], test: "hello" });
     });
   });
 
