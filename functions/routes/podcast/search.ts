@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../types/hono';
-import { searchPodcasts } from '../../lib/podcast/index';
+import { searchPodcasts } from '../../utils/podcast/index';
 
 export const searchRoutes = new Hono<{
   Bindings: Env;

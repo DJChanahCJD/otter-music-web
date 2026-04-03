@@ -1,11 +1,8 @@
 // functions/utils/proxy/index.ts
 import { safeFetch } from "./fetch";
-import { resolveSiteHeaders } from "./site-rules";
 import { filterResponseHeaders } from "./headers";
 
-export * from "./url-guard";
 export * from "./headers";
-export * from "./site-rules";
 
 /**
  * 统一代理 GET 请求入口
@@ -17,10 +14,8 @@ export async function proxyGet(
   extraHeaders?: Record<string, string>,
 ): Promise<Response> {
   const url = new URL(targetUrl);
-  const siteHeaders = resolveSiteHeaders(url);
 
   const response = await safeFetch(targetUrl, {
-    ...siteHeaders,
     ...extraHeaders,
   });
 
