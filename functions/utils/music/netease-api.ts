@@ -169,7 +169,7 @@ export async function getSongUrl(id: string, br: number = 999000, cookie: string
             cookie
         );
         
-        if (eapiRes.data?.[0]?.url) return eapiRes;
+        if (eapiRes.data?.data?.[0]?.url) return eapiRes;
         console.warn(`[NetEase] EAPI empty URL for ${realId}, falling back to WEAPI...`);
     } catch (e) {
         console.warn(`[NetEase] EAPI failed for ${realId}:`, e);
@@ -318,8 +318,134 @@ export async function getPlaylists(cat: string = '全部', order: string = 'hot'
     );
 }
 
+export async function getPlaylistDynamicDetail(id: string, cookie: string = '') {
+    const realId = id.replace(/^(neplaylist_|ne_playlist_)/, '');
+    return requestWeapi(
+        `${BASE_URL}/weapi/playlist/detail/dynamic`,
+        { id: realId },
+        cookie
+    );
+}
+
+export async function getAlbumDynamicDetail(id: string, cookie: string = '') {
+    const realId = id.replace(/^(nealbum_|ne_album_)/, '');
+    return requestWeapi(
+        `${BASE_URL}/weapi/album/detail/dynamic`,
+        { id: realId },
+        cookie
+    );
+}
+
+export async function getArtistDynamicDetail(id: string, cookie: string = '') {
+    const realId = id.replace(/^(neartist_|ne_artist_)/, '');
+    return requestWeapi(
+        `${BASE_URL}/weapi/artist/detail/dynamic`,
+        { id: realId },
+        cookie
+    );
+}
+
+export async function getArtistSongs(
+    id: string,
+    limit: number = 50,
+    offset: number = 0,
+    order: string = 'hot',
+    cookie: string = ''
+) {
+    const realId = id.replace(/^(neartist_|ne_artist_)/, '');
+    return requestWeapi<{ songs: SongDetail[]; total: number; more: boolean }>(
+        `${BASE_URL}/weapi/v1/artist/songs`,
+        { id: realId, limit, offset, order, total: true },
+        cookie
+    );
+}
+
+export async function getArtistAlbums(
+    id: string,
+    limit: number = 30,
+    offset: number = 0,
+    cookie: string = ''
+) {
+    const realId = id.replace(/^(neartist_|ne_artist_)/, '');
+    return requestWeapi(
+        `${BASE_URL}/weapi/artist/albums/${realId}`,
+        { limit, offset, total: true },
+        cookie
+    );
+}
+
+export async function getSubscribedAlbums(
+    limit: number = 25,
+    offset: number = 0,
+    cookie: string = ''
+) {
+    return requestWeapi(
+        `${BASE_URL}/weapi/album/sublist`,
+        { limit, offset, total: true },
+        cookie
+    );
+}
+
+export async function getSubscribedArtists(
+    limit: number = 25,
+    offset: number = 0,
+    cookie: string = ''
+) {
+    return requestWeapi(
+        `${BASE_URL}/weapi/artist/sublist`,
+        { limit, offset, total: true },
+        cookie
+    );
+}
+
+export async function searchSuggest(keyword: string, cookie: string = '') {
+    return requestWeapi(
+        `${BASE_URL}/weapi/search/suggest/web`,
+        { s: keyword },
+        cookie
+    );
+}
+
+export async function getHotComments(id: string, limit: number = 20, offset: number = 0, cookie: string = '') {
+    const realId = id.replace(/^(netrack_|ne_track_)/, '');
+    const rid = `R_SO_4_${realId}`;
+
+    return requestWeapi(
+        `${BASE_URL}/weapi/v1/resource/hotcomments/${rid}`,
+        { rid, limit, offset, beforeTime: 0 },
+        cookie
+    );
+}
+
+export async function getNewComments(
+    id: string,
+    pageNo: number = 1,
+    pageSize: number = 20,
+    sortType: number = 2,
+    cursor: string | number = 0,
+    cookie: string = ''
+) {
+    const realId = id.replace(/^(netrack_|ne_track_)/, '');
+
+    return requestWeapi(
+        `${BASE_URL}/weapi/comment/new`,
+        {
+            type: 0,
+            id: realId,
+            sortType,
+            cursor,
+            pageSize,
+            pageNo,
+        },
+        cookie
+    );
+}
+
+export async function getMusicComments(id: string, limit: number = 20, offset: number = 0, cookie: string = '') {
+    return getHotComments(id, limit, offset, cookie);
+}
+
 export function resolveUrl(url: string): ResolveUrlResult | null {
-    // 逻辑保持不变...
     let result: ResolveUrlResult | null = null;
     let id = '';
     
@@ -385,4 +511,21 @@ export const toggleSubPlaylist = async (id: string, shouldSub: boolean, cookie: 
         { id: realId, t: shouldSub ? 1 : 2 }, 
         cookie 
     ); 
+};
+
+export const convertSongToMusicTrack = (song: any) => {
+    const artists = song.ar || song.artists || [];
+    const album = song.al || song.album || {};
+    const songId = String(song.id || '');
+
+    return {
+        id: songId,
+        name: song.name || '',
+        artist: artists.map((a: { name: string }) => a.name),
+        album: album.name || '',
+        pic_id: album.picUrl || songId,
+        url_id: songId,
+        lyric_id: songId,
+        source: '_netease' as const,
+    };
 };

@@ -213,27 +213,29 @@ export const MusicSidebar = memo(function MusicSidebar({
           </div>
         </div>
 
-        <ScrollArea className="flex-1">
-          <div className="px-2 space-y-1 pb-4">
-            {activePlaylists.map((playlist) => (
-              <NavItem
-                key={playlist.id}
-                active={
-                  currentView === "playlist" &&
-                  currentPlaylistId === playlist.id
-                }
-                icon={ListMusic}
-                label={playlist.name}
-                onClick={() => onViewChange("playlist", playlist.id)}
-              />
-            ))}
-            {activePlaylists.length === 0 && (
-              <div className="px-4 py-8 text-center text-xs text-muted-foreground border-dashed border rounded-md mx-2">
-                暂无歌单
-              </div>
-            )}
-          </div>
-        </ScrollArea>
+        <div className="flex-1 min-h-0">
+          <ScrollArea className="h-full">
+            <div className="px-2 space-y-1 pb-4">
+              {activePlaylists.map((playlist) => (
+                <NavItem
+                  key={playlist.id}
+                  active={
+                    currentView === "playlist" &&
+                    currentPlaylistId === playlist.id
+                  }
+                  icon={ListMusic}
+                  label={playlist.name}
+                  onClick={() => onViewChange("playlist", playlist.id)}
+                />
+              ))}
+              {activePlaylists.length === 0 && (
+                <div className="px-4 py-8 text-center text-xs text-muted-foreground border-dashed border rounded-md mx-2">
+                  暂无歌单
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
       </div>
     </div>
   );
