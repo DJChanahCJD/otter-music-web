@@ -1,6 +1,5 @@
 // functions/utils/proxy/index.ts
 import { safeFetch } from "./fetch";
-import { filterResponseHeaders } from "./headers";
 
 export * from "./headers";
 
@@ -20,19 +19,6 @@ export async function proxyGet(
   });
 
   return response;
-}
-
-/**
- * 处理流式响应的辅助函数（用于透传过滤后的响应）
- */
-export function handleStreamResponse(response: Response): Response {
-  const filteredHeaders = filterResponseHeaders(response.headers);
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: filteredHeaders,
-  });
 }
 
 /**

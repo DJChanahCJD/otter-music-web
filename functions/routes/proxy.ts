@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { proxyGet, handleStreamResponse } from '@utils/proxy';
+import { proxyGet } from '@utils/proxy';
 import type { Env } from '../types/hono';
 import { fail } from '@utils/response';
 
@@ -85,20 +85,6 @@ const parseProxyParams = (c: Context, query: ProxyQuery) => {
 const validator = zValidator('query', proxySchema);
 
 proxyRoutes.get('/', validator, async (c) => {
-  try {
-    const { targetUrl, customHeaders, filename } = parseProxyParams(c, c.req.valid('query'));
-    const response = handleStreamResponse(await proxyGet(targetUrl, customHeaders));
-    
-    return new Response(response.body, {
-      status: response.status,
-      headers: applyCommonHeaders(c, new Headers(response.headers), filename),
-    });
-  } catch (e: any) {
-    return handleError(c, e);
-  }
-});
-
-proxyRoutes.get('/stream', validator, async (c) => {
   try {
     const { targetUrl, customHeaders, filename } = parseProxyParams(c, c.req.valid('query'));
     const response = await proxyGet(targetUrl, customHeaders);

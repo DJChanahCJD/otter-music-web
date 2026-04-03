@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { musicApi } from "../api";
-import { MusicTrack } from "../types";
 import { API_URL } from "../api/config";
+import { MusicTrack } from "@shared/types";
 
 /**
  * 下载音乐（智能模式）
@@ -12,7 +12,7 @@ export async function downloadTrack(track: MusicTrack) {
   const toastId = toast.loading(`准备下载: ${track.name}`);
 
   try {
-    const url = await musicApi.getUrl(track.id, track.source);
+    const url = await musicApi.getUrl(track);
     if (!url) throw new Error("无法获取下载链接");
 
     const filename = sanitizeFilename(

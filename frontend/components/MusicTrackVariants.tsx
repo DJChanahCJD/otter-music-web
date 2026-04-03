@@ -10,7 +10,8 @@ import { downloadTrack } from "@/lib/utils/download";
 import { MusicTrackMobileMenu } from "./MusicTrackMobileMenu";
 import { AddToPlaylistDialog } from "./AddToPlaylistDialog";
 import { useState } from "react";
-import { MusicTrack, sourceBadgeStyles, sourceLabels } from "@/lib/types";
+import { sourceBadgeStyles, sourceLabels } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 
 interface MusicTrackVariantsProps {
   variants: MusicTrack[];

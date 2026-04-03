@@ -1,4 +1,5 @@
-import { MusicSource, MusicTrack, MergedMusicTrack } from '../types';
+import { MusicSource, MusicTrack } from '@shared/types';
+import { MergedMusicTrack } from '../types';
 import ZH_T2S_MAP from './zh-t2s-map.json';
 /* 常量 */
 const SOURCE_PRIORITY: MusicSource[] = ['kuwo', 'joox', 'netease'];

@@ -1,4 +1,3 @@
-import { MergedMusicTrack, MusicTrack, sourceBadgeStyles, sourceLabels } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Play, Pause, Heart, Plus, ListPlus, ListMusic, Download, Trash2 } from "lucide-react";
@@ -13,6 +12,8 @@ import { AddToPlaylistDialog } from "./AddToPlaylistDialog";
 import { MusicTrackMobileMenu } from "./MusicTrackMobileMenu";
 import { MusicTrackVariants } from "./MusicTrackVariants";
 import { useShallow } from "zustand/react/shallow";
+import { MergedMusicTrack, sourceBadgeStyles, sourceLabels } from "@/lib/types";
+import { MusicTrack } from "@shared/types";
 
 interface MusicTrackItemProps {
   track: MusicTrack | MergedMusicTrack;

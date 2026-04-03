@@ -8,8 +8,8 @@ import { MusicTrackList } from "./MusicTrackList";
 import { useMusicStore } from "@/stores/music-store";
 import { useShallow } from "zustand/react/shallow";
 import { musicApi } from "@/lib/api";
-import { MusicTrack, MusicSource } from "@/lib/types";
 import { getExactKey } from "@/lib/utils/track-merger";
+import { MusicTrack, MusicSource } from "@shared/types";
 
 interface MusicSearchViewProps {
   onPlay: (track: MusicTrack, list: MusicTrack[]) => void;
