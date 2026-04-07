@@ -3,6 +3,7 @@ import type { Env } from '../../types/hono';
 import {
   getUserPlaylists,
   getPlaylistDetail,
+  getPlaylistDynamicDetail,
   getQrKey,
   checkQrStatus,
   getMyInfo,
@@ -10,26 +11,24 @@ import {
   search,
   getToplist,
   getAlbum,
+  getAlbumDynamicDetail,
   getArtist,
+  getArtistDynamicDetail,
+  getArtistSongs,
+  getArtistAlbums,
+  getSubscribedAlbums,
+  getSubscribedArtists,
   getPlaylists,
+  searchSuggest,
+  getHotComments,
+  getNewComments,
+  getMusicComments,
   resolveUrl,
   toggleSubArtist,
   toggleSubAlbum,
   toggleSubPlaylist,
 } from '../../utils/music/netease-api';
-import type {
-    QrKeyResponse,
-    QrCheckResponse,
-    UserProfile,
-    UserPlaylist,
-    PlaylistDetail,
-    RecommendPlaylist,
-    Toplist,
-    AlbumDetail,
-    ArtistDetail,
-    ResolveUrlResult,
-    SongDetail
-} from '../../utils/music/netease-types';
+import { SongDetail } from '@utils/music/netease-types';
 
 export const neteaseRoutes = new Hono<{ Bindings: Env }>();
 
@@ -120,6 +119,18 @@ neteaseRoutes.post('/playlist', async (c) => {
   }
 });
 
+neteaseRoutes.post('/playlist/dynamic', async (c) => {
+  const { id, cookie } = await c.req.json<{ id: string, cookie: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getPlaylistDynamicDetail(id, cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
 /**
  * 获取每日推荐歌单
  * @method POST
@@ -172,6 +183,18 @@ neteaseRoutes.post('/album', async (c) => {
   }
 });
 
+neteaseRoutes.post('/album/dynamic', async (c) => {
+  const { id, cookie } = await c.req.json<{ id: string, cookie: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getAlbumDynamicDetail(id, cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
 /**
  * 获取艺人详情
  * @method POST
@@ -184,6 +207,42 @@ neteaseRoutes.post('/artist', async (c) => {
   const { id, cookie } = await c.req.json<{ id: string, cookie: string }>();
   try {
     const res = await getArtist(id, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/artist/dynamic', async (c) => {
+  const { id, cookie } = await c.req.json<{ id: string, cookie: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getArtistDynamicDetail(id, cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/artist/songs', async (c) => {
+  const { id, limit, offset, order, cookie } = await c.req.json<{ id: string, limit?: number, offset?: number, order?: string, cookie?: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getArtistSongs(id, limit ?? 50, offset ?? 0, order || 'hot', cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/artist/albums', async (c) => {
+  const { id, limit, offset, cookie } = await c.req.json<{ id: string, limit?: number, offset?: number, cookie?: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getArtistAlbums(id, limit ?? 30, offset ?? 0, cookie || '');
     return c.json(res);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
@@ -205,6 +264,26 @@ neteaseRoutes.post('/playlists', async (c) => {
   const { cat, order, limit, offset, cookie } = await c.req.json<{ cat: string, order: string, limit: number, offset: number, cookie: string }>();
   try {
     const res = await getPlaylists(cat, order, limit, offset, cookie);
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/album/sublist', async (c) => {
+  const { limit, offset, cookie } = await c.req.json<{ limit?: number, offset?: number, cookie?: string }>();
+  try {
+    const res = await getSubscribedAlbums(limit ?? 25, offset ?? 0, cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/artist/sublist', async (c) => {
+  const { limit, offset, cookie } = await c.req.json<{ limit?: number, offset?: number, cookie?: string }>();
+  try {
+    const res = await getSubscribedArtists(limit ?? 25, offset ?? 0, cookie || '');
     return c.json(res);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
@@ -267,6 +346,69 @@ neteaseRoutes.post('/search', async (c) => {
 
     const hasMore = currentPage * currentLimit < songCount;
     return c.json({ items, hasMore });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/search/suggest', async (c) => {
+  const { keyword, cookie } = await c.req.json<{ keyword: string, cookie?: string }>();
+  const term = String(keyword || '').trim();
+  if (!term) return c.json({ error: 'Keyword required' }, 400);
+
+  try {
+    const res = await searchSuggest(term, cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/comments/hot', async (c) => {
+  const { id, limit, offset, cookie } = await c.req.json<{ id: string, limit?: number, offset?: number, cookie?: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getHotComments(id, limit ?? 20, offset ?? 0, cookie || '');
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/comments/new', async (c) => {
+  const { id, pageNo, pageSize, sortType, cursor, cookie } = await c.req.json<{
+    id: string,
+    pageNo?: number,
+    pageSize?: number,
+    sortType?: number,
+    cursor?: string | number,
+    cookie?: string
+  }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getNewComments(
+      id,
+      pageNo ?? 1,
+      pageSize ?? 20,
+      sortType ?? 2,
+      cursor ?? 0,
+      cookie || ''
+    );
+    return c.json(res);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+neteaseRoutes.post('/comments', async (c) => {
+  const { id, limit, offset, cookie } = await c.req.json<{ id: string, limit?: number, offset?: number, cookie?: string }>();
+  if (!id) return c.json({ error: 'ID required' }, 400);
+
+  try {
+    const res = await getMusicComments(id, limit ?? 20, offset ?? 0, cookie || '');
+    return c.json(res);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
   }
